@@ -1,4 +1,5 @@
 # 치지직 통합 녹화·VOD 다운로드 개발 명세
+- review with hongdol
 
 # E01. VOD URL 하나를 실제 파일로 다운로드
 
