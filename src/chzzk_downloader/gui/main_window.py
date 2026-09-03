@@ -120,7 +120,11 @@ class MainWindow(QMainWindow):
         # 새로운 요청 시작 시 기존 토스트 즉시 닫기
         self.toast.dismiss()
 
-        raw_url = self.url_input.text()
+        raw_url = self.url_input.text().strip()
+        if not raw_url:
+            # 빈 입력일 때는 검증 및 토스트 노출 없이 무시
+            return
+
         video_no = parse_chzzk_vod_url(raw_url)
 
         if not video_no:
