@@ -19,6 +19,24 @@ def main_window(qtbot):
     return window
 
 
+def test_empty_url_does_not_show_toast(main_window, qtbot):
+    """URL 입력칸이 비어있거나 공백만 있을 때는 토스트를 띄우지 않고 무시하는지 검증."""
+    # 1. 빈 문자열 클릭
+    main_window.url_input.setText("")
+    qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
+    assert main_window.toast.isHidden() is True
+
+    # 2. 공백 문자열 클릭
+    main_window.url_input.setText("   \t\n  ")
+    qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
+    assert main_window.toast.isHidden() is True
+
+    # 3. 빈 문자열 상태에서 Enter 키 입력
+    main_window.url_input.setText("")
+    qtbot.keyClick(main_window.url_input, Qt.Key.Key_Return)
+    assert main_window.toast.isHidden() is True
+
+
 def test_invalid_url_shows_error_toast_without_network_call(main_window, qtbot):
     """잘못된 URL 입력 시 네트워크 호출 없이 '지원하지 않는 URL' 토스트가 뜨는지 검증."""
     with patch("chzzk_downloader.gui.main_window.VodCheckWorker") as mock_worker:
