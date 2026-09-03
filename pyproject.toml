@@ -1,0 +1,23 @@
+[project]
+name = "chzzk-downloader"
+version = "0.1.0"
+description = "치지직 통합 녹화·VOD 다운로더"
+readme = "readme.md"
+requires-python = ">=3.12"
+dependencies = [
+    "PyQt6>=6.7.0",
+]
+
+[project.scripts]
+chzzk-downloader = "chzzk_downloader.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-qt>=4.4.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
