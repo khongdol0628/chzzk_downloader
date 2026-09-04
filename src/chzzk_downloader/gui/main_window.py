@@ -17,8 +17,8 @@ from PyQt6.QtWidgets import (
 )
 
 from chzzk_downloader.config import SUCCESS_TOAST_DURATION_MS
-from chzzk_downloader.core.api import VodInfo
 from chzzk_downloader.core.url_parser import parse_chzzk_vod_url
+from chzzk_downloader.core.ytdlp import VodInfo
 from chzzk_downloader.gui.toast import ToastType, ToastWidget
 from chzzk_downloader.gui.workers import VodCheckWorker
 
