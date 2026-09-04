@@ -48,12 +48,12 @@ class VodInfo:
     def display_name(self) -> str:
         """1번 위치 및 작업 표시명 규칙을 적용한 문자열을 반환합니다.
 
-        - 라이브 시작일 확인 시: [{streamer}] date:{%Y-%m-%d}; {title} ({videoNo})
-        - 미확인/일반 VOD: [{streamer}] {title} ({videoNo})
+        - 라이브 시작일 확인 시: [{streamer}] {%Y-%m-%d} {title}
+        - 미확인/일반 VOD: [{streamer}] {title}
         """
         if self.live_open_date:
-            return f"[{self.channel_name}] date:{self.live_open_date}; {self.video_title} ({self.video_no})"
-        return f"[{self.channel_name}] {self.video_title} ({self.video_no})"
+            return f"[{self.channel_name}] {self.live_open_date} {self.video_title}"
+        return f"[{self.channel_name}] {self.video_title}"
 
 
 def get_ytdlp_version() -> str:
@@ -76,13 +76,19 @@ _chzzk_hook_installed = False
 
 
 def _ensure_chzzk_hook() -> None:
-    """CHZZKVideoIE에서 원본 content의 liveOpenDate를 캡처하도록 훅을 설정합니다."""
+    """CHZZK 및 DASH 호환성 훅을 설정합니다.
+
+    1. CHZZKVideoIE에서 원본 content의 liveOpenDate를 캡처합니다.
+    2. Naver Neonplayer Single-file MPD DASH(sourceURL, media 누락으로 인한 KeyError)를 방지합니다.
+    """
     global _chzzk_hook_installed
     if _chzzk_hook_installed:
         return
     try:
         from yt_dlp.extractor.chzzk import CHZZKVideoIE
+        from yt_dlp.extractor.common import InfoExtractor
 
+        # 1. liveOpenDate 캡처 훅
         orig_download_json = CHZZKVideoIE._download_json
         orig_real_extract = CHZZKVideoIE._real_extract
 
@@ -105,6 +111,26 @@ def _ensure_chzzk_hook() -> None:
 
         CHZZKVideoIE._download_json = _hooked_download_json
         CHZZKVideoIE._real_extract = _hooked_real_extract
+
+        # 2. Naver Neonplayer Single-file MPD DASH 호환 훅 (KeyError: sourceURL / media 방지)
+        orig_parse_mpd_periods = InfoExtractor._parse_mpd_periods
+
+        def _hooked_parse_mpd_periods(
+            self: Any, mpd_doc: Any, *args: Any, **kwargs: Any
+        ) -> Any:
+            if mpd_doc is not None:
+                for elem in mpd_doc.iter():
+                    if (
+                        elem.tag.endswith("Initialization")
+                        and "sourceURL" not in elem.attrib
+                    ):
+                        elem.attrib["sourceURL"] = elem.attrib.get("range", "")
+                    if elem.tag.endswith("SegmentURL") and "media" not in elem.attrib:
+                        elem.attrib["media"] = elem.attrib.get("mediaRange", "")
+            return orig_parse_mpd_periods(self, mpd_doc, *args, **kwargs)
+
+        InfoExtractor._parse_mpd_periods = _hooked_parse_mpd_periods
+
         _chzzk_hook_installed = True
     except Exception:
         pass
