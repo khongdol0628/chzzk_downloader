@@ -50,10 +50,10 @@ def test_invalid_url_shows_error_toast_and_clears_input(main_window, qtbot):
         # 입력칸이 비워졌는지 검증
         assert main_window.url_input.text() == ""
 
-        # 지원하지 않는 URL 에러 토스트 표시 검증
+        # 지원하지 않는 URL 에러 토스트 표시 및 2초 자동 소멸 타이머 검증
         assert main_window.toast.isHidden() is False
-        assert "지원하지 않는 URL" in main_window.toast.label.text()
-        assert main_window.toast._timer.isActive() is False  # 명시적 클릭 시까지 유지
+        assert "Invalid:" in main_window.toast.label.text()
+        assert main_window.toast._timer.isActive() is True
 
 
 def test_invalid_url_toast_dismissed_on_click(main_window, qtbot):
@@ -135,12 +135,12 @@ def test_valid_url_not_found_failure_flow(main_window, qtbot):
         # 입력칸은 비워짐
         assert main_window.url_input.text() == ""
 
-        # 워커 종료 후 실패 토스트로 전환 및 클릭 전까지 유지 검증
+        # 워커 종료 후 실패 토스트로 전환 및 2초 자동 소멸 검증
         qtbot.waitUntil(
-            lambda: "VOD 확인 실패" in main_window.toast.label.text(), timeout=2000
+            lambda: "Invalid:" in main_window.toast.label.text(), timeout=2000
         )
-        assert "동영상 정보가 존재하지 않습니다." in main_window.toast.label.text()
-        assert main_window.toast._timer.isActive() is False
+        assert "99999999" in main_window.toast.label.text()
+        assert main_window.toast._timer.isActive() is True
 
 
 def test_url_input_enter_key_triggers_download(main_window, qtbot):
@@ -152,7 +152,7 @@ def test_url_input_enter_key_triggers_download(main_window, qtbot):
         # Enter 입력으로 입력칸이 비워지고 에러 토스트가 뜨는지 확인
         assert main_window.url_input.text() == ""
         assert main_window.toast.isHidden() is False
-        assert "지원하지 않는 URL" in main_window.toast.label.text()
+        assert "Invalid:" in main_window.toast.label.text()
 
 
 def test_url_input_context_menu_items_and_paste_download(main_window, qtbot):
