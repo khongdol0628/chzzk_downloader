@@ -7,7 +7,7 @@ from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtWidgets import QApplication
 
 from chzzk_downloader.config import SUCCESS_TOAST_DURATION_MS
-from chzzk_downloader.core.api import VodInfo, VodNotFoundError
+from chzzk_downloader.core.ytdlp import VodInfo, VodNotFoundError
 from chzzk_downloader.gui.main_window import MainWindow
 
 
@@ -80,7 +80,7 @@ def test_new_download_request_dismisses_previous_toast(main_window, qtbot):
         video_title="실제 테스트 방송",
         channel_name="테스트채널",
     )
-    with patch("chzzk_downloader.gui.workers.fetch_vod_info", return_value=mock_vod):
+    with patch("chzzk_downloader.gui.workers.extract_vod_info", return_value=mock_vod):
         main_window.url_input.setText("https://chzzk.naver.com/video/15016450")
         qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
 
@@ -99,7 +99,7 @@ def test_valid_url_success_flow_and_input_cleared(main_window, qtbot):
         channel_name="채널A",
     )
 
-    with patch("chzzk_downloader.gui.workers.fetch_vod_info", return_value=mock_vod):
+    with patch("chzzk_downloader.gui.workers.extract_vod_info", return_value=mock_vod):
         test_url = "https://chzzk.naver.com/video/15016450"
         main_window.url_input.setText(f"  {test_url} \n")
         qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
@@ -126,7 +126,7 @@ def test_valid_url_success_flow_and_input_cleared(main_window, qtbot):
 def test_valid_url_not_found_failure_flow(main_window, qtbot):
     """존재하지 않는 VOD URL 입력 시 실패 토스트가 유지되는지 검증."""
     with patch(
-        "chzzk_downloader.gui.workers.fetch_vod_info",
+        "chzzk_downloader.gui.workers.extract_vod_info",
         side_effect=VodNotFoundError("동영상 정보가 존재하지 않습니다."),
     ):
         main_window.url_input.setText("https://chzzk.naver.com/video/99999999")
@@ -183,7 +183,7 @@ def test_url_input_context_menu_items_and_paste_download(main_window, qtbot):
         video_title="컨텍스트 메뉴 테스트",
         channel_name="채널B",
     )
-    with patch("chzzk_downloader.gui.workers.fetch_vod_info", return_value=mock_vod):
+    with patch("chzzk_downloader.gui.workers.extract_vod_info", return_value=mock_vod):
         # 붙여넣고 다운로드 실행
         main_window._on_paste_and_download()
 
