@@ -42,6 +42,18 @@ class VodInfo:
     thumbnail_url: str = ""
     duration: int = 0
     formats: list[VodFormatInfo] = field(default_factory=list)
+    live_open_date: str = ""  # YYYY-MM-DD (라이브 시작일)
+
+    @property
+    def display_name(self) -> str:
+        """1번 위치 및 작업 표시명 규칙을 적용한 문자열을 반환합니다.
+
+        - 라이브 시작일 확인 시: [{streamer}] date:{%Y-%m-%d}; {title} ({videoNo})
+        - 미확인/일반 VOD: [{streamer}] {title} ({videoNo})
+        """
+        if self.live_open_date:
+            return f"[{self.channel_name}] date:{self.live_open_date}; {self.video_title} ({self.video_no})"
+        return f"[{self.channel_name}] {self.video_title} ({self.video_no})"
 
 
 def get_ytdlp_version() -> str:
@@ -60,6 +72,44 @@ def get_ytdlp_version() -> str:
         ) from err
 
 
+_chzzk_hook_installed = False
+
+
+def _ensure_chzzk_hook() -> None:
+    """CHZZKVideoIE에서 원본 content의 liveOpenDate를 캡처하도록 훅을 설정합니다."""
+    global _chzzk_hook_installed
+    if _chzzk_hook_installed:
+        return
+    try:
+        from yt_dlp.extractor.chzzk import CHZZKVideoIE
+
+        orig_download_json = CHZZKVideoIE._download_json
+        orig_real_extract = CHZZKVideoIE._real_extract
+
+        def _hooked_download_json(self: Any, *args: Any, **kwargs: Any) -> Any:
+            res = orig_download_json(self, *args, **kwargs)
+            if (
+                isinstance(res, dict)
+                and "content" in res
+                and isinstance(res["content"], dict)
+            ):
+                self._chzzk_live_open_date = res["content"].get("liveOpenDate")
+            return res
+
+        def _hooked_real_extract(self: Any, url: str) -> Any:
+            self._chzzk_live_open_date = None
+            info = orig_real_extract(self, url)
+            if getattr(self, "_chzzk_live_open_date", None):
+                info["live_open_date"] = self._chzzk_live_open_date
+            return info
+
+        CHZZKVideoIE._download_json = _hooked_download_json
+        CHZZKVideoIE._real_extract = _hooked_real_extract
+        _chzzk_hook_installed = True
+    except Exception:
+        pass
+
+
 def extract_vod_info(url: str, ydl_opts: dict[str, Any] | None = None) -> VodInfo:
     """yt-dlp를 사용하여 VOD 메타데이터를 추출합니다.
 
@@ -74,6 +124,8 @@ def extract_vod_info(url: str, ydl_opts: dict[str, Any] | None = None) -> VodInf
         VodNotFoundError: 영상이 존재하지 않거나 삭제/비공개인 경우
         YtDlpError: 네트워크 오류 또는 yt-dlp 처리 오류 발생 시
     """
+    _ensure_chzzk_hook()
+
     opts: dict[str, Any] = {
         "skip_download": True,
         "quiet": True,
@@ -127,6 +179,18 @@ def extract_vod_info(url: str, ydl_opts: dict[str, Any] | None = None) -> VodInf
     thumbnail_url = str(data.get("thumbnail") or "")
     duration = int(data.get("duration") or 0)
 
+    # 라이브 시작일 (liveOpenDate 등) 추출
+    live_open_date = ""
+    raw_live_date = data.get("live_open_date")
+    if raw_live_date and isinstance(raw_live_date, str):
+        # '2024-05-06 21:00:00' -> '2024-05-06'
+        live_open_date = raw_live_date.strip().split(" ")[0]
+    elif data.get("was_live") or data.get("live_status") == "was_live":
+        # yt-dlp upload_date fallback: '20240506' -> '2024-05-06'
+        upload_date = str(data.get("upload_date") or "")
+        if len(upload_date) == 8 and upload_date.isdigit():
+            live_open_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:]}"
+
     return VodInfo(
         video_no=video_no,
         video_title=video_title,
@@ -134,4 +198,5 @@ def extract_vod_info(url: str, ydl_opts: dict[str, Any] | None = None) -> VodInf
         thumbnail_url=thumbnail_url,
         duration=duration,
         formats=formats_list,
+        live_open_date=live_open_date,
     )

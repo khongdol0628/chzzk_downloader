@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMenu,
     QPushButton,
@@ -19,6 +20,7 @@ from PyQt6.QtWidgets import (
 from chzzk_downloader.config import SUCCESS_TOAST_DURATION_MS
 from chzzk_downloader.core.url_parser import parse_chzzk_vod_url
 from chzzk_downloader.core.ytdlp import VodInfo
+from chzzk_downloader.gui.task_card import TaskCardWidget, TaskStatus
 from chzzk_downloader.gui.toast import ToastType, ToastWidget
 from chzzk_downloader.gui.workers import VodCheckWorker
 
@@ -37,6 +39,10 @@ class TaskListWidget(QWidget):
         self.empty_label.setStyleSheet("color: gray; font-size: 14px;")
 
         self.list_widget = QListWidget(self)
+        self.list_widget.setStyleSheet(
+            "QListWidget { background-color: transparent; border: none; outline: none; }"
+            "QListWidget::item { background: transparent; border: none; margin-bottom: 6px; }"
+        )
 
         self.stack.addWidget(self.empty_label)
         self.stack.addWidget(self.list_widget)
@@ -50,6 +56,24 @@ class TaskListWidget(QWidget):
             self.stack.setCurrentWidget(self.empty_label)
         else:
             self.stack.setCurrentWidget(self.list_widget)
+
+    def add_task_card(self, card: TaskCardWidget) -> QListWidgetItem:
+        """작업 카드를 목록에 추가하고 표시 상태를 갱신합니다."""
+        item = QListWidgetItem(self.list_widget)
+        item.setSizeHint(card.sizeHint())
+        self.list_widget.addItem(item)
+        self.list_widget.setItemWidget(item, card)
+
+        def _on_delete() -> None:
+            row = self.list_widget.row(item)
+            if row >= 0:
+                self.list_widget.takeItem(row)
+                card.deleteLater()
+                self.refresh_state()
+
+        card.delete_requested.connect(_on_delete)
+        self.refresh_state()
+        return item
 
 
 class MainWindow(QMainWindow):
@@ -204,7 +228,7 @@ class MainWindow(QMainWindow):
                 self.download_btn.click()
 
     def _on_download_clicked(self) -> None:
-        """다운로드 버튼 클릭 핸들러 (T0102: URL 판별 및 비동기 VOD 정보 조회)."""
+        """다운로드 버튼 클릭 핸들러 (T0104: 작업 카드 즉시 추가, VOD 판별 및 비동기 정보 조회)."""
         # 새로운 요청 시작 시 기존 토스트 즉시 닫기
         self.toast.dismiss()
 
@@ -219,15 +243,31 @@ class MainWindow(QMainWindow):
         video_no = parse_chzzk_vod_url(raw_url)
 
         if not video_no:
+            # 유효하지 않은 URL: 작업 목록에 빨간색 실패 카드 즉시 추가
+            card = TaskCardWidget(
+                raw_url=raw_url,
+                status=TaskStatus.FAILED_INVALID,
+                parent=self,
+            )
+            self.task_list_widget.add_task_card(card)
+
+            # 실패 토스트: Invalid: {URL}, 설정 시간(2초) 후 자동 소멸
             self.toast.show_toast(
-                "지원하지 않는 URL",
+                f"Invalid: {raw_url}",
                 ToastType.ERROR,
-                auto_dismiss_ms=0,
+                auto_dismiss_ms=SUCCESS_TOAST_DURATION_MS,
             )
             return
 
-        # 정상 URL 추가 후 다운로드 버튼 동작 시:
-        # 반투명 검은색 오버레이에 +(파란색) [URL(흰색)] 토스트 노출 후 2초 뒤 자동 소멸
+        # 정상 치지직 VOD URL: 작업 목록에 분석 중 카드 즉시 추가
+        card = TaskCardWidget(
+            raw_url=raw_url,
+            status=TaskStatus.ANALYZING,
+            parent=self,
+        )
+        self.task_list_widget.add_task_card(card)
+
+        # 정상 요청 시: 반투명 검은색 오버레이에 +(파란색) [URL(흰색)] 토스트 노출 후 2초 뒤 자동 소멸
         message = (
             f'<span style="color: #3b82f6; font-weight: bold; font-size: 14px;">+</span> '
             f'<span style="color: #ffffff;">{raw_url}</span>'
@@ -239,25 +279,51 @@ class MainWindow(QMainWindow):
         )
 
         self.download_btn.setEnabled(False)
-        self._worker = VodCheckWorker(video_no, parent=self)
-        self._worker.finished_success.connect(self._on_vod_check_success)
-        self._worker.finished_failed.connect(self._on_vod_check_failed)
-        self._worker.finished.connect(lambda: self.download_btn.setEnabled(True))
-        self._worker.start()
+        worker = VodCheckWorker(video_no, parent=self)
+        worker.finished_success.connect(
+            lambda info, c=card: self._on_vod_check_success(info, c)
+        )
+        worker.finished_failed.connect(
+            lambda err, c=card, u=raw_url: self._on_vod_check_failed(err, c, u)
+        )
+        worker.finished.connect(lambda: self.download_btn.setEnabled(True))
+        self._worker = worker
+        worker.start()
 
-    def _on_vod_check_success(self, info: VodInfo) -> None:
-        """VOD 정보 조회 성공 처리.
-
-        성공 시 별도의 긴 텍스트 토스트는 띄우지 않고, 앞서 띄운 '+ [URL]' 토스트가
-        자연스럽게 유지/소멸되도록 합니다.
-        """
+    def _on_vod_check_success(
+        self, info: VodInfo, card: TaskCardWidget | None = None
+    ) -> None:
+        """VOD 정보 조회 성공 처리: 해당 카드에 메타데이터 반영."""
         self.current_vod_info = info
+        if card is not None:
+            card.update_with_vod_info(info)
 
-    def _on_vod_check_failed(self, error_msg: str) -> None:
-        """VOD 정보 조회 실패 시 클릭으로 닫는 실패 토스트를 표시합니다."""
-        message = f"VOD 확인 실패: {error_msg}"
+    def _on_vod_check_failed(
+        self,
+        error_msg: str,
+        card: TaskCardWidget | None = None,
+        raw_url: str = "",
+    ) -> None:
+        """VOD 정보 조회 실패 시 카드 상태 갱신 및 동일 문구의 실패 토스트(2초 자동 소멸)를 표시합니다."""
+        err_lower = error_msg.lower()
+        if (
+            "login" in err_lower
+            or "로그인" in err_lower
+            or "인증" in err_lower
+            or "adult" in err_lower
+            or "19" in err_lower
+        ):
+            status = TaskStatus.FAILED_LOGIN_REQUIRED
+            toast_msg = f"Login required; Please login: {raw_url}"
+        else:
+            status = TaskStatus.FAILED_INVALID
+            toast_msg = f"Invalid: {raw_url}"
+
+        if card is not None:
+            card.set_failed(status, error_msg)
+
         self.toast.show_toast(
-            message,
+            toast_msg,
             ToastType.ERROR,
-            auto_dismiss_ms=0,
+            auto_dismiss_ms=SUCCESS_TOAST_DURATION_MS,
         )
