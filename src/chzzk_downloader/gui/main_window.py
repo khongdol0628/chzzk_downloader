@@ -3,6 +3,7 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QCloseEvent, QResizeEvent
 from PyQt6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -77,8 +78,13 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.settings_btn)
         main_layout.addLayout(header_layout)
 
-        # 2. URL 입력칸 및 다운로드 버튼 (수평 배치)
+        # 2. URL 입력칸 및 다운로드 버튼 (수평 배치: [붙여넣기] [URL 입력칸] [다운로드])
         input_layout = QHBoxLayout()
+
+        self.paste_btn = QPushButton("📋", self)
+        self.paste_btn.setToolTip("붙여넣기")
+        self.paste_btn.clicked.connect(self._on_paste_clicked)
+
         self.url_input = QLineEdit(self)
         self.url_input.setPlaceholderText("치지직 VOD URL을 입력하세요")
         self.url_input.setClearButtonEnabled(True)
@@ -87,6 +93,7 @@ class MainWindow(QMainWindow):
         self.download_btn.clicked.connect(self._on_download_clicked)
         self.url_input.returnPressed.connect(self.download_btn.click)
 
+        input_layout.addWidget(self.paste_btn)
         input_layout.addWidget(self.url_input)
         input_layout.addWidget(self.download_btn)
         main_layout.addLayout(input_layout)
@@ -114,6 +121,14 @@ class MainWindow(QMainWindow):
     def _on_settings_clicked(self) -> None:
         """설정 버튼 클릭 핸들러 (향후 티켓에서 세부 구현)."""
         pass
+
+    def _on_paste_clicked(self) -> None:
+        """붙여넣기 버튼 클릭 핸들러: 클립보드 텍스트를 URL 입력칸에 설정."""
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            text = clipboard.text()
+            if text:
+                self.url_input.setText(text)
 
     def _on_download_clicked(self) -> None:
         """다운로드 버튼 클릭 핸들러 (T0102: URL 판별 및 비동기 VOD 정보 조회)."""
