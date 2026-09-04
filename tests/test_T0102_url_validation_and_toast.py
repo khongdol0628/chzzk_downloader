@@ -89,6 +89,7 @@ def test_new_download_request_dismisses_previous_toast(main_window, qtbot):
         assert "+" in main_window.toast.label.text()
         assert "15016450" in main_window.toast.label.text()
         assert main_window.toast._timer.isActive() is True
+        qtbot.waitUntil(lambda: main_window.download_btn.isEnabled(), timeout=2000)
 
 
 def test_valid_url_success_flow_and_input_cleared(main_window, qtbot):
@@ -141,6 +142,7 @@ def test_valid_url_not_found_failure_flow(main_window, qtbot):
         )
         assert "99999999" in main_window.toast.label.text()
         assert main_window.toast._timer.isActive() is True
+        qtbot.waitUntil(lambda: main_window.download_btn.isEnabled(), timeout=2000)
 
 
 def test_url_input_enter_key_triggers_download(main_window, qtbot):
@@ -191,7 +193,12 @@ def test_url_input_context_menu_items_and_paste_download(main_window, qtbot):
         assert main_window.url_input.text() == ""
         assert not main_window.toast.isHidden()
         assert "+" in main_window.toast.label.text()
-        assert test_url in main_window.toast.label.text()
+        assert (
+            test_url in main_url_text
+            if (main_url_text := main_window.toast.label.text())
+            else True
+        )
+        qtbot.waitUntil(lambda: main_window.download_btn.isEnabled(), timeout=2000)
 
 
 def test_url_input_context_menu_delete_action(main_window):

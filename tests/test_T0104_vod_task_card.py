@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QImage
 from PyQt6.QtWidgets import QListWidgetItem
 
 from chzzk_downloader.config import SUCCESS_TOAST_DURATION_MS
@@ -31,26 +32,26 @@ def main_window(qtbot):
 
 
 def test_vod_info_display_name_with_live_date():
-    """라이브 시작일(live_open_date)이 존재할 때 1번 위치 표시명 규칙 검증."""
+    """라이브 시작일(live_open_date)이 존재할 때 '[스트리머] YYYY-MM-DD 제목' 규칙 검증."""
     info = VodInfo(
         video_no="15016450",
         video_title="치지직 테스트 방송 다시보기",
         channel_name="스트리머A",
         live_open_date="2024-05-06",
     )
-    expected = "[스트리머A] date:2024-05-06; 치지직 테스트 방송 다시보기 (15016450)"
+    expected = "[스트리머A] 2024-05-06 치지직 테스트 방송 다시보기"
     assert info.display_name == expected
 
 
 def test_vod_info_display_name_without_live_date():
-    """라이브 시작일이 없을 때 일반 VOD 표시명 규칙 검증."""
+    """라이브 시작일이 없을 때 '[스트리머] 제목' 규칙 검증."""
     info = VodInfo(
         video_no="99999",
         video_title="일반 업로드 영상",
         channel_name="스트리머B",
         live_open_date="",
     )
-    expected = "[스트리머B] 일반 업로드 영상 (99999)"
+    expected = "[스트리머B] 일반 업로드 영상"
     assert info.display_name == expected
 
 
@@ -62,23 +63,38 @@ def test_format_duration_helper():
     assert format_duration(3665) == "01:01:05"
 
 
-def test_task_card_analyzing_state():
-    """분석 진행 상태(ANALYZING)의 카드 레이아웃 및 텍스트 검증."""
+def test_task_card_analyzing_state_and_hover_action(qtbot):
+    """분석 진행 상태(ANALYZING)의 카드 레이아웃, 줄바꿈, 호버 시 액션 아이콘 표시 검증."""
     url = "https://chzzk.naver.com/video/15016450"
     card = TaskCardWidget(raw_url=url, status=TaskStatus.ANALYZING)
+    qtbot.addWidget(card)
 
     assert card.status == TaskStatus.ANALYZING
     assert card.title_label.text() == f"분석 중... ({url})"
+    assert card.title_label.wordWrap() is True
     assert card.status_label.text() == "분석 중..."
     assert card.thumb_label.text() == "분석 중"
     assert card.auth_container.isHidden() is True
     assert "#ef4444" not in card.styleSheet()
 
+    # 액션 아이콘(삭제 버튼)은 평소에 숨겨져 있음 (공간은 retainSizeWhenHidden으로 유지)
+    assert card.delete_btn.isHidden() is True
+    assert card.delete_btn.sizePolicy().retainSizeWhenHidden() is True
 
-def test_task_card_ready_state_and_update():
+    # 마우스 진입(enterEvent) 시 노출
+    card.enterEvent(None)
+    assert card.delete_btn.isHidden() is False
+
+    # 마우스 이탈(leaveEvent) 시 다시 숨김
+    card.leaveEvent(None)
+    assert card.delete_btn.isHidden() is True
+
+
+def test_task_card_ready_state_and_update(qtbot):
     """분석 완료(READY) 상태 갱신 시 메타데이터 및 화질/시간 표시 검증."""
     url = "https://chzzk.naver.com/video/15016450"
     card = TaskCardWidget(raw_url=url, status=TaskStatus.ANALYZING)
+    qtbot.addWidget(card)
 
     mock_info = VodInfo(
         video_no="15016450",
@@ -95,20 +111,40 @@ def test_task_card_ready_state_and_update():
     card.update_with_vod_info(mock_info)
 
     assert card.status == TaskStatus.READY
-    assert (
-        card.title_label.text()
-        == "[스트리머C] date:2024-05-06; 마인크래프트 야생 (15016450)"
-    )
+    assert card.title_label.text() == "[스트리머C] 2024-05-06 마인크래프트 야생"
     assert card.status_label.text() == "1080p60 | 02:02:05"
     assert card.thumb_label.text() == "VOD"
     assert card.auth_container.isHidden() is True
     assert "#ef4444" not in card.styleSheet()
 
 
-def test_task_card_failed_invalid_styling():
+def test_task_card_thumbnail_loading(qtbot):
+    """썸네일 바이트 로드 시 QLabel에 QPixmap이 반영되는지 검증."""
+    card = TaskCardWidget(
+        raw_url="https://chzzk.naver.com/video/1", status=TaskStatus.READY
+    )
+    qtbot.addWidget(card)
+
+    # 10x10 dummy image bytes
+    image = QImage(10, 10, QImage.Format.Format_RGB32)
+    image.fill(QColor("blue"))
+    from PyQt6.QtCore import QBuffer, QIODevice
+
+    buf = QBuffer()
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    image.save(buf, "PNG")
+    img_bytes = bytes(buf.data().data())
+
+    card._on_thumbnail_loaded(img_bytes)
+    assert card.thumb_label.pixmap() is not None
+    assert card.thumb_label.text() == ""
+
+
+def test_task_card_failed_invalid_styling(qtbot):
     """유효하지 않은 URL 또는 분석 실패(FAILED_INVALID) 시 빨간색 하이라이트 검증."""
     url = "https://invalid-url.com/abc"
     card = TaskCardWidget(raw_url=url, status=TaskStatus.FAILED_INVALID)
+    qtbot.addWidget(card)
 
     assert card.status == TaskStatus.FAILED_INVALID
     assert card.title_label.text() == f"Invalid: {url}"
@@ -120,10 +156,11 @@ def test_task_card_failed_invalid_styling():
     assert "#ef4444" in card.title_label.styleSheet()
 
 
-def test_task_card_failed_login_required_styling():
+def test_task_card_failed_login_required_styling(qtbot):
     """로그인 필요(FAILED_LOGIN_REQUIRED) 시 빨간색 하이라이트 및 인증 영역 노출 검증."""
     url = "https://chzzk.naver.com/video/191919"
     card = TaskCardWidget(raw_url=url, status=TaskStatus.FAILED_LOGIN_REQUIRED)
+    qtbot.addWidget(card)
 
     assert card.status == TaskStatus.FAILED_LOGIN_REQUIRED
     assert card.title_label.text() == f"Login required; Please login: {url}"
@@ -139,25 +176,39 @@ def test_task_card_failed_login_required_styling():
 def test_task_card_delete_requested_signal(qtbot):
     """카드 내 삭제(✕) 버튼 클릭 시 delete_requested 시그널 방출 검증."""
     card = TaskCardWidget("https://chzzk.naver.com/video/123", TaskStatus.READY)
+    qtbot.addWidget(card)
     with qtbot.waitSignal(card.delete_requested, timeout=1000):
         qtbot.mouseClick(card.delete_btn, Qt.MouseButton.LeftButton)
 
 
-def test_task_list_add_and_delete_task_card():
-    """TaskListWidget에 카드 추가 시 위젯 스택 전환 및 삭제 시 복구 검증."""
+def test_task_list_add_at_top_and_delete(qtbot):
+    """새 작업 카드가 목록 최상단(Index 0)에 추가되어 오래된 항목이 아래로 가는지 검증."""
     task_list = TaskListWidget()
+    qtbot.addWidget(task_list)
     assert task_list.stack.currentWidget() == task_list.empty_label
     assert task_list.list_widget.count() == 0
 
-    card = TaskCardWidget("https://chzzk.naver.com/video/1", TaskStatus.ANALYZING)
-    item = task_list.add_task_card(card)
-
-    assert isinstance(item, QListWidgetItem)
+    # 1. 첫 번째 카드 추가 (오래된 카드)
+    card1 = TaskCardWidget("https://chzzk.naver.com/video/1", TaskStatus.ANALYZING)
+    item1 = task_list.add_task_card(card1)
+    assert isinstance(item1, QListWidgetItem)
     assert task_list.list_widget.count() == 1
-    assert task_list.stack.currentWidget() == task_list.list_widget
+    assert task_list.list_widget.itemWidget(task_list.list_widget.item(0)) == card1
 
-    # 삭제 버튼 클릭 시 항목 제거 및 빈 상태 복귀 검증
-    card.delete_btn.click()
+    # 2. 두 번째 카드 추가 (새 카드) -> Index 0 최상단에 위치해야 함
+    card2 = TaskCardWidget("https://chzzk.naver.com/video/2", TaskStatus.ANALYZING)
+    task_list.add_task_card(card2)
+    assert task_list.list_widget.count() == 2
+    assert task_list.list_widget.itemWidget(task_list.list_widget.item(0)) == card2
+    assert task_list.list_widget.itemWidget(task_list.list_widget.item(1)) == card1
+
+    # 3. card2 삭제 시 card1만 남음
+    card2.delete_btn.click()
+    assert task_list.list_widget.count() == 1
+    assert task_list.list_widget.itemWidget(task_list.list_widget.item(0)) == card1
+
+    # 4. card1 삭제 시 빈 상태 복귀
+    card1.delete_btn.click()
     assert task_list.list_widget.count() == 0
     assert task_list.stack.currentWidget() == task_list.empty_label
 
@@ -165,7 +216,7 @@ def test_task_list_add_and_delete_task_card():
 def test_main_window_invalid_url_immediately_adds_failed_card_and_toast(
     main_window, qtbot
 ):
-    """잘못된 URL 입력 시 작업 목록에 빨간색 카드가 즉시 추가되고 토스트가 뜨는지 검증."""
+    """잘못된 URL 입력 시 작업 목록 최상단에 빨간색 카드가 즉시 추가되고 토스트가 뜨는지 검증."""
     invalid_url = "https://not-chzzk.com/test"
     main_window.url_input.setText(invalid_url)
     qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
@@ -173,7 +224,7 @@ def test_main_window_invalid_url_immediately_adds_failed_card_and_toast(
     # 1. 입력칸 즉시 클리어 검증
     assert main_window.url_input.text() == ""
 
-    # 2. 작업 목록에 빨간색 실패 카드 즉시 등록 검증
+    # 2. 작업 목록 최상단에 빨간색 실패 카드 즉시 등록 검증
     assert main_window.task_list.count() == 1
     card = main_window.task_list.itemWidget(main_window.task_list.item(0))
     assert isinstance(card, TaskCardWidget)
@@ -217,12 +268,9 @@ def test_main_window_valid_url_success_flow(main_window, qtbot):
         # 3. 워커 완료 대기
         qtbot.waitUntil(lambda: main_window.download_btn.isEnabled(), timeout=2000)
 
-        # 4. 카드 갱신 결과 검증 (READY 및 1번 위치 라이브 시작일 표시명)
+        # 4. 카드 갱신 결과 검증 (READY 및 1번 위치 [스트리머] 2024-05-06 제목)
         assert card.status == TaskStatus.READY
-        assert (
-            card.title_label.text()
-            == "[스트리머D] date:2024-05-06; 테스트 라이브 방송 (15016450)"
-        )
+        assert card.title_label.text() == "[스트리머D] 2024-05-06 테스트 라이브 방송"
         assert card.status_label.text() == "1080p60 | 01:00:00"
         assert "#ef4444" not in card.styleSheet()
 
@@ -247,12 +295,35 @@ def test_main_window_valid_url_login_required_flow(main_window, qtbot):
         expected_msg = f"Login required; Please login: {test_url}"
         assert card.title_label.text() == expected_msg
         assert "#ef4444" in card.styleSheet()
-        assert card.auth_container.isVisible() is True
+        assert card.auth_container.isHidden() is False
 
         # 2. 토스트 알림 동일 문구 및 2초 자동 소멸 타이머 검증
         assert main_window.toast.isHidden() is False
         assert expected_msg in main_window.toast.label.text()
         assert main_window.toast._timer.isActive() is True
+
+
+def test_main_window_401_unauthorized_triggers_login_required(main_window, qtbot):
+    """실제 치지직 쿠키 필요 VOD의 401 Unauthorized 오류 시 Login required 상태로 전환되는지 검증."""
+    test_url = "https://chzzk.naver.com/video/15021267"
+    err_401 = YtDlpError(
+        "ERROR: [chzzk:video] 15021267: Failed to download MPD manifest: HTTP Error 401: Unauthorized"
+    )
+
+    with patch("chzzk_downloader.gui.workers.extract_vod_info", side_effect=err_401):
+        main_window.url_input.setText(test_url)
+        qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
+
+        qtbot.waitUntil(lambda: main_window.download_btn.isEnabled(), timeout=2000)
+
+        card = main_window.task_list.itemWidget(main_window.task_list.item(0))
+        assert isinstance(card, TaskCardWidget)
+        assert card.status == TaskStatus.FAILED_LOGIN_REQUIRED
+        assert f"Login required; Please login: {test_url}" in card.title_label.text()
+        assert (
+            f"Login required; Please login: {test_url}"
+            in main_window.toast.label.text()
+        )
 
 
 def test_main_window_valid_url_not_found_flow(main_window, qtbot):
