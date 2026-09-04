@@ -1,7 +1,7 @@
 """메인 윈도우 모듈."""
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QCloseEvent, QResizeEvent
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtGui import QAction, QCloseEvent, QResizeEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QMainWindow,
+    QMenu,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -60,6 +61,8 @@ class MainWindow(QMainWindow):
         self.resize(640, 480)
 
         self._worker: VodCheckWorker | None = None
+        self._url_context_menu: QMenu | None = None
+        self.current_vod_info: VodInfo | None = None
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -88,6 +91,8 @@ class MainWindow(QMainWindow):
         self.url_input = QLineEdit(self)
         self.url_input.setPlaceholderText("치지직 VOD URL을 입력하세요")
         self.url_input.setClearButtonEnabled(True)
+        self.url_input.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.url_input.customContextMenuRequested.connect(self._show_url_context_menu)
 
         self.download_btn = QPushButton("다운로드", self)
         self.download_btn.clicked.connect(self._on_download_clicked)
@@ -130,6 +135,74 @@ class MainWindow(QMainWindow):
             if text:
                 self.url_input.setText(text)
 
+    def _create_url_context_menu(self) -> QMenu:
+        """URL 입력칸의 우클릭 컨텍스트 메뉴(non-modal)를 생성합니다."""
+        menu = QMenu(self.url_input)
+
+        undo_action = QAction("실행 취소", menu)
+        undo_action.triggered.connect(self.url_input.undo)
+        undo_action.setEnabled(self.url_input.isUndoAvailable())
+        menu.addAction(undo_action)
+
+        redo_action = QAction("다시 실행", menu)
+        redo_action.triggered.connect(self.url_input.redo)
+        redo_action.setEnabled(self.url_input.isRedoAvailable())
+        menu.addAction(redo_action)
+
+        menu.addSeparator()
+
+        cut_action = QAction("잘라내기", menu)
+        cut_action.triggered.connect(self.url_input.cut)
+        cut_action.setEnabled(self.url_input.hasSelectedText())
+        menu.addAction(cut_action)
+
+        copy_action = QAction("복사", menu)
+        copy_action.triggered.connect(self.url_input.copy)
+        copy_action.setEnabled(self.url_input.hasSelectedText())
+        menu.addAction(copy_action)
+
+        clipboard = QApplication.clipboard()
+        has_clip = bool(clipboard is not None and clipboard.text())
+
+        paste_action = QAction("붙여넣기", menu)
+        paste_action.triggered.connect(self.url_input.paste)
+        paste_action.setEnabled(has_clip)
+        menu.addAction(paste_action)
+
+        paste_download_action = QAction("붙여넣고 다운로드", menu)
+        paste_download_action.triggered.connect(self._on_paste_and_download)
+        paste_download_action.setEnabled(has_clip)
+        menu.addAction(paste_download_action)
+
+        delete_action = QAction("삭제", menu)
+        delete_action.triggered.connect(self.url_input.del_)
+        delete_action.setEnabled(self.url_input.hasSelectedText())
+        menu.addAction(delete_action)
+
+        menu.addSeparator()
+
+        select_all_action = QAction("모두 선택", menu)
+        select_all_action.triggered.connect(self.url_input.selectAll)
+        select_all_action.setEnabled(bool(self.url_input.text()))
+        menu.addAction(select_all_action)
+
+        return menu
+
+    def _show_url_context_menu(self, pos: QPoint) -> None:
+        """URL 입력칸 우클릭 시 non-modal로 컨텍스트 메뉴를 띄웁니다."""
+        self._url_context_menu = self._create_url_context_menu()
+        global_pos = self.url_input.mapToGlobal(pos)
+        self._url_context_menu.popup(global_pos)
+
+    def _on_paste_and_download(self) -> None:
+        """클립보드 내용을 붙여넣고 즉시 다운로드 버튼을 클릭합니다."""
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            text = clipboard.text()
+            if text:
+                self.url_input.setText(text)
+                self.download_btn.click()
+
     def _on_download_clicked(self) -> None:
         """다운로드 버튼 클릭 핸들러 (T0102: URL 판별 및 비동기 VOD 정보 조회)."""
         # 새로운 요청 시작 시 기존 토스트 즉시 닫기
@@ -139,6 +212,9 @@ class MainWindow(QMainWindow):
         if not raw_url:
             # 빈 입력일 때는 검증 및 토스트 노출 없이 무시
             return
+
+        # 어떠한 방법으로든 다운로드 동작이 트리거되면 URL 입력칸 즉시 비우기
+        self.url_input.clear()
 
         video_no = parse_chzzk_vod_url(raw_url)
 
@@ -150,6 +226,18 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # 정상 URL 추가 후 다운로드 버튼 동작 시:
+        # 반투명 검은색 오버레이에 +(파란색) [URL(흰색)] 토스트 노출 후 2초 뒤 자동 소멸
+        message = (
+            f'<span style="color: #3b82f6; font-weight: bold; font-size: 14px;">+</span> '
+            f'<span style="color: #ffffff;">{raw_url}</span>'
+        )
+        self.toast.show_toast(
+            message,
+            ToastType.SUCCESS,
+            auto_dismiss_ms=SUCCESS_TOAST_DURATION_MS,
+        )
+
         self.download_btn.setEnabled(False)
         self._worker = VodCheckWorker(video_no, parent=self)
         self._worker.finished_success.connect(self._on_vod_check_success)
@@ -158,13 +246,12 @@ class MainWindow(QMainWindow):
         self._worker.start()
 
     def _on_vod_check_success(self, info: VodInfo) -> None:
-        """VOD 정보 조회 성공 시 2초 자동 소멸 토스트를 표시합니다."""
-        message = f"VOD 정보 확인 성공\n{info.video_title} (ID: {info.video_no})"
-        self.toast.show_toast(
-            message,
-            ToastType.SUCCESS,
-            auto_dismiss_ms=SUCCESS_TOAST_DURATION_MS,
-        )
+        """VOD 정보 조회 성공 처리.
+
+        성공 시 별도의 긴 텍스트 토스트는 띄우지 않고, 앞서 띄운 '+ [URL]' 토스트가
+        자연스럽게 유지/소멸되도록 합니다.
+        """
+        self.current_vod_info = info
 
     def _on_vod_check_failed(self, error_msg: str) -> None:
         """VOD 정보 조회 실패 시 클릭으로 닫는 실패 토스트를 표시합니다."""
