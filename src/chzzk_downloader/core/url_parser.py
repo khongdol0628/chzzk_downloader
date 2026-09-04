@@ -31,4 +31,3 @@ def parse_chzzk_vod_url(raw_url: str) -> str | None:
         return None
 
     return match.group(1)
-

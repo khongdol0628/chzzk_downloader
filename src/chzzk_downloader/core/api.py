@@ -49,7 +49,6 @@ def fetch_vod_info(video_no: str, timeout: float = 10.0) -> VodInfo:
 
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
-            status_code = response.getcode()
             raw_body = response.read().decode("utf-8")
     except urllib.error.HTTPError as e:
         if e.code == 404:
@@ -67,7 +66,9 @@ def fetch_vod_info(video_no: str, timeout: float = 10.0) -> VodInfo:
 
     code = data.get("code")
     if code == 404:
-        raise VodNotFoundError(data.get("message") or "동영상 정보가 존재하지 않습니다.")
+        raise VodNotFoundError(
+            data.get("message") or "동영상 정보가 존재하지 않습니다."
+        )
     if code != 200:
         message = data.get("message") or f"오류 코드 {code}"
         raise VodApiError(f"치지직 API 오류: {message}")
@@ -92,4 +93,3 @@ def fetch_vod_info(video_no: str, timeout: float = 10.0) -> VodInfo:
         duration=duration,
         thumbnail_url=thumbnail_url,
     )
-

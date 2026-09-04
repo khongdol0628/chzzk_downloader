@@ -82,8 +82,10 @@ def test_new_download_request_dismisses_previous_toast(main_window, qtbot):
 
         # 워커 종료 대기
         qtbot.waitUntil(
-            lambda: not main_window.toast.isHidden()
-            and "VOD 정보 확인 성공" in main_window.toast.label.text(),
+            lambda: (
+                not main_window.toast.isHidden()
+                and "VOD 정보 확인 성공" in main_window.toast.label.text()
+            ),
             timeout=2000,
         )
         assert "실제 테스트 방송" in main_window.toast.label.text()
@@ -143,4 +145,3 @@ def test_url_input_enter_key_triggers_download(main_window, qtbot):
         # Enter 입력으로 다운로드 로직이 수행되어 에러 토스트가 뜨는지 확인
         assert main_window.toast.isHidden() is False
         assert "지원하지 않는 URL" in main_window.toast.label.text()
-

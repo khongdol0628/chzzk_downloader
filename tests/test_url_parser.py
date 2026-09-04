@@ -40,4 +40,3 @@ def test_parse_valid_chzzk_vod_url(input_url, expected_id):
 def test_parse_invalid_url(invalid_url):
     """유효하지 않거나 다른 사이트의 URL은 None을 반환하는지 검증."""
     assert parse_chzzk_vod_url(invalid_url) is None
-

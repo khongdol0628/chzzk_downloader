@@ -1,7 +1,8 @@
 """오버레이 토스트 알림 위젯."""
 
 from enum import Enum
-from PyQt6.QtCore import QTimer, Qt
+
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import (
     QFrame,
@@ -45,7 +46,9 @@ class ToastWidget(QFrame):
 
         self.close_label = QLabel("✕", self)
         self.close_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.close_label.setStyleSheet("color: white; font-weight: bold; font-size: 13px;")
+        self.close_label.setStyleSheet(
+            "color: white; font-weight: bold; font-size: 13px;"
+        )
         layout.addWidget(self.close_label)
 
     def show_toast(
@@ -84,9 +87,9 @@ class ToastWidget(QFrame):
 
     def reposition(self) -> None:
         """부모 위젯 기준으로 토스트 위치를 중앙 하단으로 재배치합니다."""
-        if not self.parent():
-            return
         parent_widget = self.parentWidget()
+        if parent_widget is None:
+            return
         max_width = max(240, int(parent_widget.width() * 0.85))
         self.setMaximumWidth(max_width)
         self.adjustSize()
@@ -105,4 +108,3 @@ class ToastWidget(QFrame):
         self.dismiss()
         if event is not None:
             super().mousePressEvent(event)
-
