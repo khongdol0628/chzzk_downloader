@@ -58,10 +58,10 @@ class TaskListWidget(QWidget):
             self.stack.setCurrentWidget(self.list_widget)
 
     def add_task_card(self, card: TaskCardWidget) -> QListWidgetItem:
-        """작업 카드를 목록에 추가하고 표시 상태를 갱신합니다."""
-        item = QListWidgetItem(self.list_widget)
+        """작업 카드를 목록 최상단에 추가하고 표시 상태를 갱신합니다."""
+        item = QListWidgetItem()
         item.setSizeHint(card.sizeHint())
-        self.list_widget.addItem(item)
+        self.list_widget.insertItem(0, item)
         self.list_widget.setItemWidget(item, card)
 
         def _on_delete() -> None:
@@ -312,6 +312,10 @@ class MainWindow(QMainWindow):
             or "인증" in err_lower
             or "adult" in err_lower
             or "19" in err_lower
+            or "401" in err_lower
+            or "unauthorized" in err_lower
+            or "403" in err_lower
+            or "forbidden" in err_lower
         ):
             status = TaskStatus.FAILED_LOGIN_REQUIRED
             toast_msg = f"Login required; Please login: {raw_url}"

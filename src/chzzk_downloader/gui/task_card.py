@@ -1,8 +1,11 @@
 """다운로드 작업 카드(Task Card) 위젯 모듈."""
 
+import urllib.request
 from enum import Enum
+from typing import Any
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QSize, Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QEnterEvent, QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -12,6 +15,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from chzzk_downloader.config import DEFAULT_USER_AGENT
 from chzzk_downloader.core.ytdlp import VodInfo
 
 
@@ -36,6 +40,28 @@ def format_duration(seconds: int) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
+class ThumbnailLoaderThread(QThread):
+    """썸네일 이미지를 백그라운드에서 비동기로 다운로드하는 스레드."""
+
+    loaded = pyqtSignal(bytes)
+
+    def __init__(self, url: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.url = url
+
+    def run(self) -> None:
+        try:
+            req = urllib.request.Request(
+                self.url,
+                headers={"User-Agent": DEFAULT_USER_AGENT},
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                data = resp.read()
+            self.loaded.emit(data)
+        except Exception:
+            pass
+
+
 class TaskCardWidget(QFrame):
     """작업 목록에 표시되는 VOD 개별 작업 카드 위젯 (시계 방향 4분면 레이아웃)."""
 
@@ -53,17 +79,21 @@ class TaskCardWidget(QFrame):
         self.status = status
         self.vod_info = vod_info
         self.error_message: str = ""
+        self._thumb_loader: ThumbnailLoaderThread | None = None
 
         self._init_ui()
         self._update_display()
         self._apply_style()
+
+        if self.vod_info and self.vod_info.thumbnail_url:
+            self._load_thumbnail(self.vod_info.thumbnail_url)
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(400, 88)
 
     def _init_ui(self) -> None:
         self.setObjectName("TaskCardWidget")
-        self.setFixedHeight(88)
+        self.setMinimumHeight(88)
 
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(10, 8, 10, 8)
@@ -73,6 +103,7 @@ class TaskCardWidget(QFrame):
         self.thumb_label = QLabel(self)
         self.thumb_label.setFixedSize(120, 68)
         self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumb_label.setScaledContents(True)
         self.thumb_label.setStyleSheet(
             "background-color: #2a2a2a; color: #888888; border-radius: 4px; font-weight: bold; font-size: 12px;"
         )
@@ -89,17 +120,27 @@ class TaskCardWidget(QFrame):
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(8)
 
-        # 1번 위치 (좌상단): 작업명 / 상태 표시 라벨
+        # 1번 위치 (좌상단): 작업명 / 상태 표시 라벨 (좌측 정렬 줄바꿈 지원)
         self.title_label = QLabel(self)
         self.title_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.title_label.setWordWrap(True)
+        self.title_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
         self.title_label.setStyleSheet("font-size: 13px; font-weight: 600;")
         top_row.addWidget(self.title_label, stretch=1)
 
         # 2번 위치 (우상단): 회색조 액션 아이콘 그룹 (삭제 ✕ 버튼)
+        # 마우스 진입(Hover) 시 노출되나, 숨김 시에도 공간을 예약(setRetainSizeWhenHidden)하여
+        # 1번 위치 텍스트의 줄바꿈 위치가 흔들리지 않도록 유지
         self.delete_btn = QPushButton("✕", self)
         self.delete_btn.setToolTip("목록에서 제거")
         self.delete_btn.setFixedSize(24, 24)
         self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        sp = self.delete_btn.sizePolicy()
+        sp.setRetainSizeWhenHidden(True)
+        self.delete_btn.setSizePolicy(sp)
+        self.delete_btn.hide()
         self.delete_btn.setStyleSheet(
             "QPushButton { background-color: transparent; color: #888888; border: none; font-size: 13px; font-weight: bold; }"
             "QPushButton:hover { background-color: rgba(239, 68, 68, 0.2); color: #ef4444; border-radius: 3px; }"
@@ -148,6 +189,44 @@ class TaskCardWidget(QFrame):
         info_layout.addLayout(bottom_row)
         main_layout.addLayout(info_layout, stretch=1)
 
+    def enterEvent(self, event: QEnterEvent | None) -> None:  # noqa: N802
+        super().enterEvent(event)
+        self.delete_btn.show()
+
+    def leaveEvent(self, event: QEvent | None) -> None:  # noqa: N802
+        super().leaveEvent(event)
+        self.delete_btn.hide()
+
+    def closeEvent(self, event: Any) -> None:  # noqa: N802
+        if self._thumb_loader is not None and self._thumb_loader.isRunning():
+            self._thumb_loader.quit()
+            self._thumb_loader.wait()
+        super().closeEvent(event)
+
+    def _load_thumbnail(self, url: str) -> None:
+        """비동기로 썸네일 이미지를 다운로드하여 라벨에 표시합니다."""
+        if not url:
+            return
+        if self._thumb_loader is not None and self._thumb_loader.isRunning():
+            self._thumb_loader.quit()
+            self._thumb_loader.wait()
+        self._thumb_loader = ThumbnailLoaderThread(url, parent=self)
+        self._thumb_loader.loaded.connect(self._on_thumbnail_loaded)
+        self._thumb_loader.start()
+
+    def _on_thumbnail_loaded(self, img_bytes: bytes) -> None:
+        """다운로드된 썸네일 바이트를 QPixmap으로 변환하여 표시합니다."""
+        pixmap = QPixmap()
+        if pixmap.loadFromData(img_bytes):
+            scaled = pixmap.scaled(
+                120,
+                68,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.thumb_label.setPixmap(scaled)
+            self.thumb_label.setText("")
+
     def _update_display(self) -> None:
         """현재 상태에 따라 UI 텍스트 및 가시성을 갱신합니다."""
         if self.status == TaskStatus.ANALYZING:
@@ -175,7 +254,8 @@ class TaskCardWidget(QFrame):
                     f"{best_quality} | {dur_str}" if best_quality else dur_str
                 )
             self.auth_container.hide()
-            self.thumb_label.setText("VOD")
+            if not (self.vod_info and self.vod_info.thumbnail_url):
+                self.thumb_label.setText("VOD")
         elif self.status == TaskStatus.FAILED_LOGIN_REQUIRED:
             self.title_label.setText(f"Login required; Please login: {self.raw_url}")
             self.status_label.setText("로그인 필요")
@@ -233,6 +313,8 @@ class TaskCardWidget(QFrame):
         self.vod_info = info
         self._update_display()
         self._apply_style()
+        if info.thumbnail_url:
+            self._load_thumbnail(info.thumbnail_url)
 
     def set_failed(self, status: TaskStatus, error_message: str = "") -> None:
         """분석 실패 또는 오류 상태로 카드를 갱신하고 빨간색 하이라이트를 적용합니다."""
