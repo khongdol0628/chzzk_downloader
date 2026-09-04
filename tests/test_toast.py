@@ -15,8 +15,7 @@ def toast_widget(qtbot):
     parent.resize(400, 300)
     parent.show()
     toast = ToastWidget(parent)
-    toast._parent_ref = parent
-    return toast
+    yield toast
 
 
 def test_toast_initial_state(toast_widget):
@@ -57,4 +56,3 @@ def test_toast_click_to_dismiss(toast_widget, qtbot):
     # 토스트 위젯 클릭
     qtbot.mouseClick(toast_widget, Qt.MouseButton.LeftButton)
     assert toast_widget.isHidden() is True
-

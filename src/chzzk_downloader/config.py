@@ -12,4 +12,3 @@ DEFAULT_USER_AGENT: str = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
-

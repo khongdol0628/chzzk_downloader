@@ -76,4 +76,3 @@ def test_no_unimplemented_widgets(main_window):
     assert not hasattr(main_window, "channel_list")
     assert not hasattr(main_window, "notification_area")
     assert not hasattr(main_window, "system_status")
-

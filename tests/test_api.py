@@ -3,6 +3,7 @@
 import io
 import json
 import urllib.error
+from email.message import Message
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -39,7 +40,9 @@ def test_fetch_vod_info_success():
         },
     }
 
-    with patch("urllib.request.urlopen", return_value=_create_mock_response(200, mock_payload)):
+    with patch(
+        "urllib.request.urlopen", return_value=_create_mock_response(200, mock_payload)
+    ):
         info = fetch_vod_info("15016450")
         assert isinstance(info, VodInfo)
         assert info.video_no == "15016450"
@@ -55,8 +58,12 @@ def test_fetch_vod_info_http_404():
         url="https://api.chzzk.naver.com/service/v3/videos/99999",
         code=404,
         msg="Not Found",
-        hdrs={},
-        fp=io.BytesIO(json.dumps({"code": 404, "message": "동영상 정보가 존재하지 않습니다."}).encode("utf-8")),
+        hdrs=Message(),
+        fp=io.BytesIO(
+            json.dumps(
+                {"code": 404, "message": "동영상 정보가 존재하지 않습니다."}
+            ).encode("utf-8")
+        ),
     )
 
     with patch("urllib.request.urlopen", side_effect=http_error):
@@ -70,7 +77,7 @@ def test_fetch_vod_info_http_500():
         url="https://api.chzzk.naver.com/service/v3/videos/123",
         code=500,
         msg="Internal Server Error",
-        hdrs={},
+        hdrs=Message(),
         fp=io.BytesIO(b""),
     )
 
@@ -96,6 +103,8 @@ def test_fetch_vod_info_api_error_code():
         "content": None,
     }
 
-    with patch("urllib.request.urlopen", return_value=_create_mock_response(200, mock_payload)):
+    with patch(
+        "urllib.request.urlopen", return_value=_create_mock_response(200, mock_payload)
+    ):
         with pytest.raises(VodApiError, match="잘못된 요청입니다"):
             fetch_vod_info("123")

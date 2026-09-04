@@ -24,4 +24,3 @@ class VodCheckWorker(QThread):
             self.finished_failed.emit(str(e))
         except Exception as e:
             self.finished_failed.emit(f"예기치 못한 오류: {e}")
-
