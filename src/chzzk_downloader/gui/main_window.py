@@ -1,7 +1,7 @@
 """메인 윈도우 모듈."""
 
 from PyQt6 import sip
-from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtCore import QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QCloseEvent, QResizeEvent
 from PyQt6.QtWidgets import (
     QApplication,
@@ -28,6 +28,8 @@ from chzzk_downloader.gui.workers import VodCheckWorker
 
 class TaskListWidget(QWidget):
     """작업 목록 및 빈 상태 안내를 관리하는 위젯."""
+
+    request_open_settings = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -96,6 +98,7 @@ class TaskListWidget(QWidget):
                 self.refresh_state()
 
         card.delete_requested.connect(_on_delete)
+        card.request_open_cookies.connect(self.request_open_settings.emit)
         self.refresh_state()
         return item
 
@@ -153,6 +156,7 @@ class MainWindow(QMainWindow):
 
         # 3. 작업 목록 영역 (URL 입력칸 하단)
         self.task_list_widget = TaskListWidget(self)
+        self.task_list_widget.request_open_settings.connect(self._on_settings_clicked)
         self.task_list = self.task_list_widget.list_widget
         self.empty_label = self.task_list_widget.empty_label
         main_layout.addWidget(self.task_list_widget)
@@ -169,11 +173,55 @@ class MainWindow(QMainWindow):
         if self._worker is not None and self._worker.isRunning():
             self._worker.quit()
             self._worker.wait()
+        if hasattr(self, "_settings_window") and self._settings_window is not None:
+            self._settings_window.close()
         super().closeEvent(event)
 
     def _on_settings_clicked(self) -> None:
-        """설정 버튼 클릭 핸들러 (향후 티켓에서 세부 구현)."""
-        pass
+        """설정 버튼 또는 카드 내 쿠키 설정/로그인 클릭 핸들러 (Modeless 설정 창 오픈)."""
+        from chzzk_downloader.gui.settings_window import SettingsWindow
+
+        if not hasattr(self, "_settings_window") or self._settings_window is None:
+            self._settings_window = SettingsWindow(self)
+            self._settings_window.cookies_updated.connect(self._on_cookies_updated)
+        self._settings_window.refresh_status()
+        self._settings_window.show()
+        self._settings_window.raise_()
+        self._settings_window.activateWindow()
+
+    def _on_cookies_updated(self) -> None:
+        """쿠키 저장/불러오기 시 로그인 필요 실패 카드 자동 재분석 (T0106 옵션 A)."""
+        from chzzk_downloader.core.cookie_manager import has_valid_cookies
+
+        if not has_valid_cookies():
+            return
+
+        failed_cards = [
+            c
+            for c in self.task_list_widget.get_all_cards()
+            if c.status == TaskStatus.FAILED_LOGIN_REQUIRED and not c.is_deleted
+        ]
+        if not failed_cards:
+            return
+
+        self.toast.show_toast(
+            "쿠키가 등록되어 로그인 필요 작업을 다시 분석합니다.",
+            ToastType.SUCCESS,
+            auto_dismiss_ms=SUCCESS_TOAST_DURATION_MS,
+        )
+
+        for card in failed_cards:
+            card.status = TaskStatus.ANALYZING
+            card._update_display()
+            card._apply_style()
+            worker = VodCheckWorker(card.video_no or card.raw_url, parent=self)
+            worker.finished_success.connect(
+                lambda info, c=card: self._on_vod_check_success(info, c)
+            )
+            worker.finished_failed.connect(
+                lambda err, c=card, u=card.raw_url: self._on_vod_check_failed(err, c, u)
+            )
+            worker.start()
 
     def _on_paste_clicked(self) -> None:
         """붙여넣기 버튼 클릭 핸들러: 클립보드 텍스트를 URL 입력칸에 설정."""

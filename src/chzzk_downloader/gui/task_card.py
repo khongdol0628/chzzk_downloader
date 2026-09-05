@@ -68,6 +68,7 @@ class TaskCardWidget(QFrame):
     """작업 목록에 표시되는 VOD 개별 작업 카드 위젯 (시계 방향 4분면 레이아웃)."""
 
     delete_requested = pyqtSignal()
+    request_open_cookies = pyqtSignal()
 
     def __init__(
         self,
@@ -183,6 +184,8 @@ class TaskCardWidget(QFrame):
             "QPushButton { background-color: #03c75a; color: white; border: none; border-radius: 3px; padding: 2px 8px; font-size: 11px; }"
             "QPushButton:hover { background-color: #02b150; }"
         )
+        self.cookie_btn.clicked.connect(self.request_open_cookies.emit)
+        self.login_btn.clicked.connect(self.request_open_cookies.emit)
         auth_layout.addWidget(self.cookie_btn)
         auth_layout.addWidget(self.login_btn)
         self.auth_container.hide()
