@@ -9,7 +9,6 @@ from PyQt6.QtWidgets import QMessageBox
 from chzzk_downloader.core.cookie_manager import (
     clear_cookies,
     export_cookie_file,
-    extract_chrome_cookies,
     get_cookie_status_summary,
     get_cookies_text,
     has_valid_cookies,
@@ -136,62 +135,6 @@ def test_export_and_load_cookie_file(setup_test_cookie_path, tmp_path):
     assert "NID_AUT\texport_aut" in get_cookies_text()
 
 
-def test_extract_chrome_cookies_mocked(setup_test_cookie_path):
-    """Chrome 브라우저 쿠키 추출(yt-dlp extract_cookies_from_browser) 모킹 동작 검증."""
-
-    # Dummy cookie object
-    class DummyCookie:
-        def __init__(self, domain, name, value):
-            self.domain = domain
-            self.name = name
-            self.value = value
-
-    mock_jar = [
-        DummyCookie(".naver.com", "NID_AUT", "chrome_aut_123"),
-        DummyCookie(".naver.com", "NID_SES", "chrome_ses_456"),
-        DummyCookie(".google.com", "OTHER", "ignore_this"),
-    ]
-
-    with patch("yt_dlp.cookies.extract_cookies_from_browser", return_value=mock_jar):
-        ok, msg = extract_chrome_cookies()
-        assert ok is True
-        assert "성공적으로 가져왔습니다" in msg
-        assert has_valid_cookies() is True
-        content = get_cookies_text()
-        assert "NID_AUT\tchrome_aut_123" in content
-        assert "google.com" not in content  # 타 도메인은 배제
-
-
-def test_extract_chrome_cookies_locked_database_guidance(setup_test_cookie_path):
-    """Chrome 브라우저 실행 중 쿠키 DB 잠금(Issue 7271) 발생 시 사용자 친화적 안내 문구 반환 검증."""
-    from yt_dlp.utils import DownloadError
-
-    err = DownloadError(
-        "Could not copy Chrome cookie database. See https://github.com/yt-dlp/yt-dlp/issues/7271 for more info"
-    )
-
-    with patch("yt_dlp.cookies.extract_cookies_from_browser", side_effect=err):
-        ok, msg = extract_chrome_cookies()
-        assert ok is False
-        assert (
-            "Chrome 브라우저가 현재 실행 중이어서 쿠키 데이터베이스가 잠겨 있습니다"
-            in msg
-        )
-        assert "[네이버 로그인]" in msg
-        assert "완전히 종료" in msg
-
-    # DPAPI (Chrome 127+ App-Bound Encryption) 오류 가이드 검증
-    dpapi_err = DownloadError(
-        "Failed to decrypt with DPAPI. See https://github.com/yt-dlp/yt-dlp/issues/10927 for more info"
-    )
-    with patch("yt_dlp.cookies.extract_cookies_from_browser", side_effect=dpapi_err):
-        ok, msg = extract_chrome_cookies()
-        assert ok is False
-        assert "최신 Chrome(127 이상)" in msg
-        assert "App-Bound Encryption" in msg
-        assert "[네이버 로그인]" in msg
-
-
 def test_cookie_viewer_dialog_save_and_cancel(qtbot):
     """CookieViewerDialog에서 텍스트 입력 후 저장 및 취소 동작 검증."""
     dialog = CookieViewerDialog()
@@ -225,6 +168,22 @@ def test_settings_window_modeless_and_actions(qtbot, tmp_path):
     save_cookies_text("NID_AUT=set_aut; NID_SES=set_ses")
     window.refresh_status()
     assert "NID_AUT, NID_SES 확인" in window.status_label.text()
+
+    # 파일 불러오기 테스트
+    cookie_txt = tmp_path / "imported.txt"
+    cookie_txt.write_text(
+        ".naver.com\tTRUE\t/\tTRUE\t2147483647\tNID_AUT\timported_aut\n",
+        encoding="utf-8",
+    )
+    with patch(
+        "PyQt6.QtWidgets.QFileDialog.getOpenFileName",
+        return_value=(str(cookie_txt), "txt"),
+    ):
+        with patch.object(QMessageBox, "information"):
+            with qtbot.waitSignal(window.cookies_updated, timeout=1000):
+                window._on_import_file()
+    assert has_valid_cookies() is True
+    assert "NID_AUT 확인" in window.status_label.text()
 
     # 초기화 클릭 (QMessageBox Yes 모킹)
     with patch.object(

@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from chzzk_downloader.core.cookie_manager import save_network_cookies
+from chzzk_downloader.core.cookie_manager import _to_str, save_network_cookies
 
 
 class NaverLoginDialog(QDialog):
@@ -101,19 +101,29 @@ class NaverLoginDialog(QDialog):
             self.cookie_store = prof.cookieStore()
             if self.cookie_store is not None:
                 self.cookie_store.cookieAdded.connect(self._on_cookie_added)
-            page = QWebEnginePage(prof, self.webview)
-            self.webview.setPage(page)
+            self._webpage = QWebEnginePage(prof, self.webview)
+            self.webview.setPage(self._webpage)
         self.webview.urlChanged.connect(self._on_url_changed)
         self.webview.load(QUrl(self.LOGIN_URL))
 
     def _cleanup(self) -> None:
         """웹뷰 리소스 및 시그널을 안전하게 분리합니다."""
+        if getattr(self, "_is_cleaned_up", False):
+            return
+        self._is_cleaned_up = True
+
         if hasattr(self, "cookie_store") and self.cookie_store is not None:
             try:
                 self.cookie_store.cookieAdded.disconnect(self._on_cookie_added)
             except Exception:
                 pass
+            self.cookie_store = None
+
         if hasattr(self, "webview") and self.webview is not None:
+            try:
+                self.webview.urlChanged.disconnect(self._on_url_changed)
+            except Exception:
+                pass
             try:
                 self.webview.stop()
             except Exception:
@@ -128,12 +138,24 @@ class NaverLoginDialog(QDialog):
         super().closeEvent(event)
 
     def _on_cookie_added(self, cookie: QNetworkCookie) -> None:
-        """쿠키 추가 이벤트 핸들러."""
-        name = cookie.name().data().decode("utf-8", errors="ignore")
-        domain = cookie.domain()
+        """쿠키 추가 이벤트 핸들러 - C++ 수명 이슈 방지를 위해 즉시 원시 값으로 복사합니다."""
+        try:
+            name = _to_str(cookie.name()).strip()
+            value = _to_str(cookie.value()).strip()
+            domain = _to_str(cookie.domain()).strip()
+            path = _to_str(cookie.path()).strip() or "/"
+            is_secure = bool(cookie.isSecure())
+        except Exception:
+            return
 
-        if "naver.com" in domain:
-            self._collected_cookies[name] = cookie
+        if "naver.com" in domain and name and value:
+            self._collected_cookies[name] = {
+                "name": name,
+                "value": value,
+                "domain": domain,
+                "path": path,
+                "is_secure": is_secure,
+            }
 
             if name in ("NID_AUT", "NID_SES"):
                 found = [
@@ -141,12 +163,14 @@ class NaverLoginDialog(QDialog):
                 ]
                 self.status_label.setText(
                     f"✓ 인증 정보가 감지되었습니다 ({', '.join(found)}). "
-                    "자동 전환 대기 중이거나 '로그인 완료'를 눌러 저장하세요."
+                    "자동 완료 대기 중이거나 '로그인 완료'를 눌러 저장하세요."
                 )
                 self.status_label.setStyleSheet(
                     "font-size: 11px; color: #10b981; font-weight: bold;"
                 )
                 self.save_btn.setEnabled(True)
+                # 감지 즉시 파일에 선제 저장 (Write-Through)하여 비정상 종료 시에도 쿠키 보존
+                save_network_cookies(list(self._collected_cookies.values()))
 
     def _on_url_changed(self, url: QUrl) -> None:
         """페이지 이동 시 로그인 완료 여부를 확인합니다."""
@@ -161,12 +185,17 @@ class NaverLoginDialog(QDialog):
                 "naver.com" in url_str and "nidlogin" not in url_str
             ):
                 self._is_completed = True
-                self.status_label.setText("✓ 로그인 성공! 쿠키를 저장하는 중...")
+                self.status_label.setText(
+                    "✓ 로그인 성공! 쿠키를 저장하고 창을 닫습니다..."
+                )
                 # 사용자에게 성공 메시지를 잠시 보여준 뒤 자동 저장 및 닫기
-                QTimer.singleShot(600, self._on_save_and_close)
+                QTimer.singleShot(400, self._on_save_and_close)
 
     def _on_save_and_close(self) -> None:
         """수집된 쿠키를 저장하고 다이얼로그를 완료합니다."""
+        if getattr(self, "_is_saved_and_closed", False):
+            return
+
         if not self._collected_cookies:
             QMessageBox.warning(
                 self,
@@ -177,6 +206,7 @@ class NaverLoginDialog(QDialog):
 
         ok, msg = save_network_cookies(list(self._collected_cookies.values()))
         if ok:
+            self._is_saved_and_closed = True
             self._cleanup()
             self.accept()
             self.login_success.emit(msg)

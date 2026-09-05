@@ -199,88 +199,20 @@ def get_cookie_status_summary(cookie_path: Path | None = None) -> str:
         return "쿠키 파일 읽기 오류"
 
 
-def extract_chrome_cookies(
-    cookie_path: Path | None = None,
-) -> tuple[bool, str]:
-    """Chrome 브라우저에서 네이버 로그인 쿠키를 추출하여 저장합니다."""
+def _to_str(val: Any) -> str:
+    if isinstance(val, str):
+        return val
     try:
-        from yt_dlp.cookies import extract_cookies_from_browser
-
-        jar = extract_cookies_from_browser("chrome")
-    except Exception as e:
-        err_msg = str(e)
-        if "DPAPI" in err_msg or "10927" in err_msg:
-            return (
-                False,
-                "최신 Chrome(127 이상)은 Google의 보안 정책(App-Bound Encryption)으로 인해 "
-                "외부 프로그램의 직접 쿠키 복호화가 원천 차단되어 있습니다.\n\n"
-                "권장 해결 방법:\n"
-                "1. [네이버 로그인] 버튼을 클릭하여 프로그램 내에서 직접 로그인 (가장 간편하고 확실한 방법)\n"
-                "2. Chrome 확장 프로그램('Get cookies.txt LOCALLY' 등)으로 추출한 Netscape 쿠키 파일(*.txt)을 [쿠키 파일 선택...]으로 불러오기",
-            )
-        if (
-            "Could not copy" in err_msg
-            or "Permission denied" in err_msg
-            or "7271" in err_msg
-        ):
-            return (
-                False,
-                "Chrome 브라우저가 현재 실행 중이어서 쿠키 데이터베이스가 잠겨 있습니다.\n\n"
-                "해결 방법:\n"
-                "1. [네이버 로그인] 버튼을 클릭하여 내장 브라우저에서 간편하게 로그인 (권장)\n"
-                "2. Chrome 브라우저(트레이 아이콘 및 백그라운드 포함)를 완전히 종료한 후 다시 시도\n"
-                "3. 브라우저 확장 프로그램으로 내보낸 쿠키 파일(*.txt)을 [쿠키 파일 불러오기]로 등록",
-            )
-        return (
-            False,
-            f"Chrome 브라우저 쿠키 추출 실패: {err_msg}\n\n"
-            "※ Chrome 브라우저 종료 후 다시 시도하시거나, [네이버 로그인] 또는 [쿠키 파일 불러오기]를 이용해 주세요.",
-        )
-
-    # naver.com 도메인 쿠키만 선별
-    naver_cookies: dict[str, str] = {}
-    for cookie in jar:
-        domain = getattr(cookie, "domain", "")
-        if "naver.com" in domain:
-            name = getattr(cookie, "name", "")
-            value = getattr(cookie, "value", "")
-            if name and value:
-                naver_cookies[name] = value
-
-    if not ("NID_AUT" in naver_cookies or "NID_SES" in naver_cookies):
-        return (
-            False,
-            "Chrome 브라우저에서 네이버 로그인 쿠키(NID_AUT 또는 NID_SES)를 찾지 못했습니다.\n"
-            "Chrome 브라우저에서 네이버에 로그인되어 있는지 확인해 주세요.",
-        )
-
-    # Netscape 파일로 생성
-    netscape_lines = [
-        "# Netscape HTTP Cookie File",
-        "# Extracted from Chrome by Chzzk Downloader",
-    ]
-    for k, v in naver_cookies.items():
-        netscape_lines.append(f".naver.com\tTRUE\t/\tFALSE\t2147483647\t{k}\t{v}")
-
-    content = "\n".join(netscape_lines) + "\n"
-    target_path = cookie_path or get_cookie_file_path()
-    try:
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(content, encoding="utf-8")
-        found = [k for k in ["NID_AUT", "NID_SES"] if k in naver_cookies]
-        return (
-            True,
-            f"Chrome 브라우저에서 네이버 쿠키를 성공적으로 가져왔습니다 ({', '.join(found)}).",
-        )
-    except Exception as e:
-        return False, f"쿠키 파일 쓰기 오류: {e}"
+        return bytes(val).decode("utf-8", errors="ignore")
+    except Exception:
+        return str(val)
 
 
 def save_network_cookies(
     cookies: list[Any],
     cookie_path: Path | None = None,
 ) -> tuple[bool, str]:
-    """QNetworkCookie 목록에서 네이버 쿠키를 추출하여 Netscape 파일로 저장합니다."""
+    """QNetworkCookie 또는 dict 목록에서 네이버 쿠키를 추출하여 Netscape 파일로 저장합니다."""
     netscape_lines = [
         "# Netscape HTTP Cookie File",
         "# Extracted from Naver Login by Chzzk Downloader",
@@ -290,23 +222,33 @@ def save_network_cookies(
 
     for c in cookies:
         try:
-            name = (
-                c.name().data().decode("utf-8", errors="ignore")
-                if hasattr(c, "name")
-                else getattr(c, "name", "")
-            )
-            value = (
-                c.value().data().decode("utf-8", errors="ignore")
-                if hasattr(c, "value")
-                else getattr(c, "value", "")
-            )
-            domain = c.domain() if hasattr(c, "domain") else getattr(c, "domain", "")
-            path = (c.path() if hasattr(c, "path") else getattr(c, "path", "/")) or "/"
-            is_secure = (
-                c.isSecure()
-                if hasattr(c, "isSecure")
-                else getattr(c, "is_secure", False)
-            )
+            if isinstance(c, dict):
+                name = _to_str(c.get("name", "")).strip()
+                value = _to_str(c.get("value", "")).strip()
+                domain = _to_str(c.get("domain", "")).strip()
+                path = _to_str(c.get("path", "/")).strip() or "/"
+                is_secure = bool(c.get("is_secure", True))
+            else:
+                raw_name = c.name() if hasattr(c, "name") else getattr(c, "name", "")
+                name = _to_str(raw_name).strip()
+
+                raw_val = c.value() if hasattr(c, "value") else getattr(c, "value", "")
+                value = _to_str(raw_val).strip()
+
+                domain = _to_str(
+                    c.domain() if hasattr(c, "domain") else getattr(c, "domain", "")
+                ).strip()
+                path = (
+                    _to_str(
+                        c.path() if hasattr(c, "path") else getattr(c, "path", "/")
+                    ).strip()
+                    or "/"
+                )
+                is_secure = (
+                    c.isSecure()
+                    if hasattr(c, "isSecure")
+                    else getattr(c, "is_secure", False)
+                )
         except Exception:
             continue
 

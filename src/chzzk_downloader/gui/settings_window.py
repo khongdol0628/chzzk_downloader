@@ -3,14 +3,12 @@
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QMenu,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -20,7 +18,6 @@ from PyQt6.QtWidgets import (
 from chzzk_downloader.core.cookie_manager import (
     clear_cookies,
     export_cookie_file,
-    extract_chrome_cookies,
     get_cookie_status_summary,
     load_cookie_file,
 )
@@ -84,19 +81,9 @@ class SettingsWindow(QDialog):
         self.view_btn.clicked.connect(self._on_view_clicked)
         btn_row.addWidget(self.view_btn)
 
-        self.import_btn = QPushButton("불러오기 ▾", self.cookie_group)
+        self.import_btn = QPushButton("파일 불러오기", self.cookie_group)
         self.import_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._import_menu = QMenu(self.import_btn)
-
-        action_file = QAction("쿠키 파일(*.txt) 선택...", self._import_menu)
-        action_file.triggered.connect(self._on_import_file)
-        self._import_menu.addAction(action_file)
-
-        action_chrome = QAction("Chrome 브라우저에서 가져오기", self._import_menu)
-        action_chrome.triggered.connect(self._on_import_chrome)
-        self._import_menu.addAction(action_chrome)
-
-        self.import_btn.setMenu(self._import_menu)
+        self.import_btn.clicked.connect(self._on_import_file)
         btn_row.addWidget(self.import_btn)
 
         self.export_btn = QPushButton("내보내기", self.cookie_group)
@@ -145,9 +132,11 @@ class SettingsWindow(QDialog):
         """내장 브라우저 네이버 로그인 창을 엽니다."""
         from chzzk_downloader.gui.naver_login_dialog import NaverLoginDialog
 
-        dialog = NaverLoginDialog(self)
-        dialog.login_success.connect(self._on_naver_login_success)
-        dialog.exec()
+        self._login_dialog = NaverLoginDialog(self)
+        self._login_dialog.login_success.connect(self._on_naver_login_success)
+        self._login_dialog.exec()
+        self._login_dialog.deleteLater()
+        self._login_dialog = None
 
     def _on_naver_login_success(self, msg: str) -> None:
         """네이버 로그인 완료 시 상태를 갱신하고 변경 시그널을 방출합니다."""
@@ -177,16 +166,6 @@ class SettingsWindow(QDialog):
                 self.cookies_updated.emit()
             else:
                 QMessageBox.warning(self, "불러오기 실패", msg)
-
-    def _on_import_chrome(self) -> None:
-        """Chrome 브라우저에서 네이버 로그인 쿠키를 자동으로 추출합니다."""
-        ok, msg = extract_chrome_cookies()
-        if ok:
-            QMessageBox.information(self, "Chrome 쿠키 가져오기 완료", msg)
-            self.refresh_status()
-            self.cookies_updated.emit()
-        else:
-            QMessageBox.warning(self, "Chrome 쿠키 가져오기 실패", msg)
 
     def _on_export_clicked(self) -> None:
         """현재 저장된 쿠키를 파일로 내보냅니다."""

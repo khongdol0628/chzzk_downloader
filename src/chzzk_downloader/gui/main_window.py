@@ -192,9 +192,11 @@ class MainWindow(QMainWindow):
         """네이버 로그인 버튼 클릭 시 내장 브라우저 로그인 창을 엽니다."""
         from chzzk_downloader.gui.naver_login_dialog import NaverLoginDialog
 
-        dialog = NaverLoginDialog(self)
-        dialog.login_success.connect(self._on_naver_login_success)
-        dialog.exec()
+        self._login_dialog = NaverLoginDialog(self)
+        self._login_dialog.login_success.connect(self._on_naver_login_success)
+        self._login_dialog.exec()
+        self._login_dialog.deleteLater()
+        self._login_dialog = None
 
     def _on_naver_login_success(self, msg: str) -> None:
         """네이버 로그인 완료 시 토스트 안내, 설정창 갱신 및 실패 카드 자동 재분석."""
