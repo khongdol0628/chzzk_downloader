@@ -1,5 +1,7 @@
 """애플리케이션 전역 설정 및 상수."""
 
+from pathlib import Path
+
 # 성공 토스트 자동 소멸 대기 시간 (밀리초 단위, 기본 2초)
 SUCCESS_TOAST_DURATION_MS: int = 2000
 
@@ -12,3 +14,6 @@ DEFAULT_USER_AGENT: str = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
+
+# 기본 쿠키 파일 저장 경로
+DEFAULT_COOKIE_FILE_PATH: Path = Path.home() / ".chzzk_downloader" / "cookies.txt"
