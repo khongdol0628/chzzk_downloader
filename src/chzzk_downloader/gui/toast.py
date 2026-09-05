@@ -67,12 +67,12 @@ class ToastWidget(QFrame):
         self.label.setText(message)
 
         if toast_type == ToastType.SUCCESS:
-            bg_color = "#2E7D32"  # 녹색
+            bg_style = "background-color: rgba(20, 20, 20, 215); border: 1px solid rgba(255, 255, 255, 0.2);"
         else:
-            bg_color = "#C62828"  # 빨간색
+            bg_style = "background-color: #C62828; border: none;"
 
         self.setStyleSheet(
-            f"ToastWidget {{ background-color: {bg_color}; border-radius: 8px; }}"
+            f"ToastWidget {{ {bg_style} border-radius: 8px; }}"
             f"QLabel {{ color: white; font-size: 13px; font-weight: 500; }}"
         )
 
