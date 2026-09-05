@@ -180,6 +180,17 @@ def test_extract_chrome_cookies_locked_database_guidance(setup_test_cookie_path)
         assert "[네이버 로그인]" in msg
         assert "완전히 종료" in msg
 
+    # DPAPI (Chrome 127+ App-Bound Encryption) 오류 가이드 검증
+    dpapi_err = DownloadError(
+        "Failed to decrypt with DPAPI. See https://github.com/yt-dlp/yt-dlp/issues/10927 for more info"
+    )
+    with patch("yt_dlp.cookies.extract_cookies_from_browser", side_effect=dpapi_err):
+        ok, msg = extract_chrome_cookies()
+        assert ok is False
+        assert "최신 Chrome(127 이상)" in msg
+        assert "App-Bound Encryption" in msg
+        assert "[네이버 로그인]" in msg
+
 
 def test_cookie_viewer_dialog_save_and_cancel(qtbot):
     """CookieViewerDialog에서 텍스트 입력 후 저장 및 취소 동작 검증."""

@@ -1,5 +1,7 @@
 """메인 윈도우 모듈."""
 
+from typing import Any
+
 from PyQt6 import sip
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QCloseEvent, QResizeEvent
@@ -114,6 +116,7 @@ class MainWindow(QMainWindow):
         self.resize(640, 480)
 
         self._worker: VodCheckWorker | None = None
+        self._recheck_workers: list[VodCheckWorker] = []
         self._url_context_menu: QMenu | None = None
         self.current_vod_info: VodInfo | None = None
         self._init_ui()
@@ -176,6 +179,11 @@ class MainWindow(QMainWindow):
         if self._worker is not None and self._worker.isRunning():
             self._worker.quit()
             self._worker.wait()
+        for w in self._recheck_workers:
+            if w.isRunning():
+                w.quit()
+                w.wait()
+        self._recheck_workers.clear()
         if hasattr(self, "_settings_window") and self._settings_window is not None:
             self._settings_window.close()
         super().closeEvent(event)
@@ -237,12 +245,27 @@ class MainWindow(QMainWindow):
             card._update_display()
             card._apply_style()
             worker = VodCheckWorker(card.video_no or card.raw_url, parent=self)
-            worker.finished_success.connect(
-                lambda info, c=card: self._on_vod_check_success(info, c)
-            )
-            worker.finished_failed.connect(
-                lambda err, c=card, u=card.raw_url: self._on_vod_check_failed(err, c, u)
-            )
+            self._recheck_workers.append(worker)
+
+            def _on_success(
+                info: Any, c: TaskCardWidget = card, w: VodCheckWorker = worker
+            ) -> None:
+                if w in self._recheck_workers:
+                    self._recheck_workers.remove(w)
+                self._on_vod_check_success(info, c)
+
+            def _on_failed(
+                err: str,
+                c: TaskCardWidget = card,
+                u: str = card.raw_url,
+                w: VodCheckWorker = worker,
+            ) -> None:
+                if w in self._recheck_workers:
+                    self._recheck_workers.remove(w)
+                self._on_vod_check_failed(err, c, u)
+
+            worker.finished_success.connect(_on_success)
+            worker.finished_failed.connect(_on_failed)
             worker.start()
 
     def _on_paste_clicked(self) -> None:

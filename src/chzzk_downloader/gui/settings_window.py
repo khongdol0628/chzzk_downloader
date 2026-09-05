@@ -88,12 +88,6 @@ class SettingsWindow(QDialog):
         self.import_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._import_menu = QMenu(self.import_btn)
 
-        action_login = QAction(
-            "네이버 간편 로그인 (내장 브라우저)...", self._import_menu
-        )
-        action_login.triggered.connect(self._on_naver_login_clicked)
-        self._import_menu.addAction(action_login)
-
         action_file = QAction("쿠키 파일(*.txt) 선택...", self._import_menu)
         action_file.triggered.connect(self._on_import_file)
         self._import_menu.addAction(action_file)
@@ -157,7 +151,6 @@ class SettingsWindow(QDialog):
 
     def _on_naver_login_success(self, msg: str) -> None:
         """네이버 로그인 완료 시 상태를 갱신하고 변경 시그널을 방출합니다."""
-        QMessageBox.information(self, "로그인 완료", msg)
         self.refresh_status()
         self.cookies_updated.emit()
 

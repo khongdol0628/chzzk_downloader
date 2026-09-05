@@ -209,6 +209,15 @@ def extract_chrome_cookies(
         jar = extract_cookies_from_browser("chrome")
     except Exception as e:
         err_msg = str(e)
+        if "DPAPI" in err_msg or "10927" in err_msg:
+            return (
+                False,
+                "최신 Chrome(127 이상)은 Google의 보안 정책(App-Bound Encryption)으로 인해 "
+                "외부 프로그램의 직접 쿠키 복호화가 원천 차단되어 있습니다.\n\n"
+                "권장 해결 방법:\n"
+                "1. [네이버 로그인] 버튼을 클릭하여 프로그램 내에서 직접 로그인 (가장 간편하고 확실한 방법)\n"
+                "2. Chrome 확장 프로그램('Get cookies.txt LOCALLY' 등)으로 추출한 Netscape 쿠키 파일(*.txt)을 [쿠키 파일 선택...]으로 불러오기",
+            )
         if (
             "Could not copy" in err_msg
             or "Permission denied" in err_msg

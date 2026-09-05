@@ -94,17 +94,38 @@ class NaverLoginDialog(QDialog):
         layout.addLayout(bottom_layout)
 
     def _init_webengine(self) -> None:
-        # 네이버 로그인 전용 프로필 설정
-        self.profile = QWebEngineProfile("chzzk_naver_profile", self)
-        self.cookie_store = self.profile.cookieStore()
-        if self.cookie_store is not None:
-            self.cookie_store.cookieAdded.connect(self._on_cookie_added)
-
-        # 페이지 연결 및 로드
-        page = QWebEnginePage(self.profile, self.webview)
-        self.webview.setPage(page)
+        # 전역 기본 프로필 사용 (종료 시 크래시 방지 및 브라우저 세션 보존)
+        prof = QWebEngineProfile.defaultProfile()
+        self.profile = prof
+        if prof is not None:
+            self.cookie_store = prof.cookieStore()
+            if self.cookie_store is not None:
+                self.cookie_store.cookieAdded.connect(self._on_cookie_added)
+            page = QWebEnginePage(prof, self.webview)
+            self.webview.setPage(page)
         self.webview.urlChanged.connect(self._on_url_changed)
         self.webview.load(QUrl(self.LOGIN_URL))
+
+    def _cleanup(self) -> None:
+        """웹뷰 리소스 및 시그널을 안전하게 분리합니다."""
+        if hasattr(self, "cookie_store") and self.cookie_store is not None:
+            try:
+                self.cookie_store.cookieAdded.disconnect(self._on_cookie_added)
+            except Exception:
+                pass
+        if hasattr(self, "webview") and self.webview is not None:
+            try:
+                self.webview.stop()
+            except Exception:
+                pass
+
+    def reject(self) -> None:
+        self._cleanup()
+        super().reject()
+
+    def closeEvent(self, event: Any) -> None:  # noqa: N802
+        self._cleanup()
+        super().closeEvent(event)
 
     def _on_cookie_added(self, cookie: QNetworkCookie) -> None:
         """쿠키 추가 이벤트 핸들러."""
@@ -156,7 +177,8 @@ class NaverLoginDialog(QDialog):
 
         ok, msg = save_network_cookies(list(self._collected_cookies.values()))
         if ok:
-            self.login_success.emit(msg)
+            self._cleanup()
             self.accept()
+            self.login_success.emit(msg)
         else:
             QMessageBox.warning(self, "쿠키 저장 실패", msg)
