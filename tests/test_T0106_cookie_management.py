@@ -162,6 +162,25 @@ def test_extract_chrome_cookies_mocked(setup_test_cookie_path):
         assert "google.com" not in content  # 타 도메인은 배제
 
 
+def test_extract_chrome_cookies_locked_database_guidance(setup_test_cookie_path):
+    """Chrome 브라우저 실행 중 쿠키 DB 잠금(Issue 7271) 발생 시 사용자 친화적 안내 문구 반환 검증."""
+    from yt_dlp.utils import DownloadError
+
+    err = DownloadError(
+        "Could not copy Chrome cookie database. See https://github.com/yt-dlp/yt-dlp/issues/7271 for more info"
+    )
+
+    with patch("yt_dlp.cookies.extract_cookies_from_browser", side_effect=err):
+        ok, msg = extract_chrome_cookies()
+        assert ok is False
+        assert (
+            "Chrome 브라우저가 현재 실행 중이어서 쿠키 데이터베이스가 잠겨 있습니다"
+            in msg
+        )
+        assert "[네이버 로그인]" in msg
+        assert "완전히 종료" in msg
+
+
 def test_cookie_viewer_dialog_save_and_cancel(qtbot):
     """CookieViewerDialog에서 텍스트 입력 후 저장 및 취소 동작 검증."""
     dialog = CookieViewerDialog()
@@ -223,23 +242,76 @@ def test_main_window_settings_button_opens_modeless_window(main_window, qtbot):
     assert main_window._settings_window is existing
 
 
-def test_task_card_auth_buttons_open_settings_window(main_window, qtbot):
-    """로그인 필요 실패 카드의 [쿠키 설정] 및 [네이버 로그인] 버튼 클릭 시 설정 창이 열리는지 검증."""
+def test_task_card_auth_buttons_distinct_actions(main_window, qtbot):
+    """로그인 필요 카드의 [쿠키 설정]은 설정창을 열고, [네이버 로그인]은 로그인 다이얼로그를 트리거하는지 검증."""
     card = TaskCardWidget(
         raw_url="https://chzzk.naver.com/video/19000",
         status=TaskStatus.FAILED_LOGIN_REQUIRED,
     )
     main_window.task_list_widget.add_task_card(card)
 
-    # 1. [쿠키 설정] 클릭 -> 설정 창 열림
+    # 1. [쿠키 설정] 클릭 -> Modeless 설정 창 열림
     qtbot.mouseClick(card.cookie_btn, Qt.MouseButton.LeftButton)
     assert main_window._settings_window is not None
     assert main_window._settings_window.isVisible() is True
     main_window._settings_window.close()
 
-    # 2. [네이버 로그인] 클릭 -> 설정 창 열림
-    qtbot.mouseClick(card.login_btn, Qt.MouseButton.LeftButton)
-    assert main_window._settings_window.isVisible() is True
+    # 2. [네이버 로그인] 클릭 -> request_naver_login 시그널 방출 및 NaverLoginDialog.exec 호출 검증
+    with patch(
+        "chzzk_downloader.gui.naver_login_dialog.NaverLoginDialog.exec"
+    ) as mock_exec:
+        with qtbot.waitSignal(card.request_naver_login, timeout=1000):
+            qtbot.mouseClick(card.login_btn, Qt.MouseButton.LeftButton)
+        assert mock_exec.called is True
+
+
+def test_save_network_cookies_and_naver_login_dialog(setup_test_cookie_path, qtbot):
+    """save_network_cookies 함수 및 NaverLoginDialog 쿠키 감지·완료 로직 검증."""
+    from PyQt6.QtCore import QByteArray
+    from PyQt6.QtNetwork import QNetworkCookie
+
+    from chzzk_downloader.core.cookie_manager import save_network_cookies
+    from chzzk_downloader.gui.naver_login_dialog import NaverLoginDialog
+
+    # 1. save_network_cookies 검증
+    cookie_aut = QNetworkCookie(QByteArray(b"NID_AUT"), QByteArray(b"test_net_aut"))
+    cookie_aut.setDomain(".naver.com")
+    cookie_aut.setPath("/")
+    cookie_aut.setSecure(True)
+
+    cookie_ses = QNetworkCookie(QByteArray(b"NID_SES"), QByteArray(b"test_net_ses"))
+    cookie_ses.setDomain(".naver.com")
+    cookie_ses.setPath("/")
+
+    cookie_other = QNetworkCookie(QByteArray(b"OTHER"), QByteArray(b"val"))
+    cookie_other.setDomain(".google.com")
+
+    # 인증 쿠키 없을 때 실패
+    ok, err = save_network_cookies([cookie_other])
+    assert ok is False
+    assert "감지되지 않았습니다" in err
+
+    # 유효 쿠키 저장 성공
+    ok, msg = save_network_cookies([cookie_aut, cookie_ses, cookie_other])
+    assert ok is True
+    assert "저장되었습니다" in msg
+    assert has_valid_cookies() is True
+    assert "test_net_aut" in get_cookies_text()
+
+    # 2. NaverLoginDialog 이벤트 핸들러 검증
+    with patch("PyQt6.QtWebEngineWidgets.QWebEngineView.load"):
+        dialog = NaverLoginDialog()
+        qtbot.addWidget(dialog)
+        assert dialog.save_btn.isEnabled() is False
+
+        # 쿠키 추가 이벤트 시뮬레이션
+        dialog._on_cookie_added(cookie_aut)
+        assert dialog.save_btn.isEnabled() is True
+        assert "인증 정보가 감지되었습니다" in dialog.status_label.text()
+
+        # 저장 및 닫기 호출 시 시그널 방출 확인
+        with qtbot.waitSignal(dialog.login_success, timeout=1000):
+            dialog._on_save_and_close()
 
 
 def test_main_window_auto_reanalyze_failed_login_cards_on_cookie_update(

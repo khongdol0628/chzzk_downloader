@@ -65,9 +65,19 @@ class SettingsWindow(QDialog):
         self.status_label.setStyleSheet("font-size: 12px; font-weight: bold;")
         group_layout.addWidget(self.status_label)
 
-        # 액션 버튼 행: [보기 / 직접 입력] [불러오기 ▾] [내보내기] [초기화]
+        # 액션 버튼 행: [네이버 로그인] [보기 / 직접 입력] [불러오기 ▾] [내보내기] [초기화]
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
+
+        self.login_btn = QPushButton("네이버 로그인", self.cookie_group)
+        self.login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.login_btn.setStyleSheet(
+            "QPushButton { background-color: #03c75a; color: white; border: none; "
+            "border-radius: 4px; padding: 4px 12px; font-size: 12px; font-weight: bold; }"
+            "QPushButton:hover { background-color: #02b150; }"
+        )
+        self.login_btn.clicked.connect(self._on_naver_login_clicked)
+        btn_row.addWidget(self.login_btn)
 
         self.view_btn = QPushButton("보기 / 직접 입력", self.cookie_group)
         self.view_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -77,6 +87,12 @@ class SettingsWindow(QDialog):
         self.import_btn = QPushButton("불러오기 ▾", self.cookie_group)
         self.import_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._import_menu = QMenu(self.import_btn)
+
+        action_login = QAction(
+            "네이버 간편 로그인 (내장 브라우저)...", self._import_menu
+        )
+        action_login.triggered.connect(self._on_naver_login_clicked)
+        self._import_menu.addAction(action_login)
 
         action_file = QAction("쿠키 파일(*.txt) 선택...", self._import_menu)
         action_file.triggered.connect(self._on_import_file)
@@ -130,6 +146,20 @@ class SettingsWindow(QDialog):
             )
             self.export_btn.setEnabled(False)
             self.clear_btn.setEnabled(False)
+
+    def _on_naver_login_clicked(self) -> None:
+        """내장 브라우저 네이버 로그인 창을 엽니다."""
+        from chzzk_downloader.gui.naver_login_dialog import NaverLoginDialog
+
+        dialog = NaverLoginDialog(self)
+        dialog.login_success.connect(self._on_naver_login_success)
+        dialog.exec()
+
+    def _on_naver_login_success(self, msg: str) -> None:
+        """네이버 로그인 완료 시 상태를 갱신하고 변경 시그널을 방출합니다."""
+        QMessageBox.information(self, "로그인 완료", msg)
+        self.refresh_status()
+        self.cookies_updated.emit()
 
     def _on_view_clicked(self) -> None:
         """쿠키 보기 및 직접 입력 모달 다이얼로그를 엽니다."""

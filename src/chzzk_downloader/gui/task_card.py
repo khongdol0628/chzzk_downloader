@@ -69,6 +69,7 @@ class TaskCardWidget(QFrame):
 
     delete_requested = pyqtSignal()
     request_open_cookies = pyqtSignal()
+    request_naver_login = pyqtSignal()
 
     def __init__(
         self,
@@ -185,7 +186,7 @@ class TaskCardWidget(QFrame):
             "QPushButton:hover { background-color: #02b150; }"
         )
         self.cookie_btn.clicked.connect(self.request_open_cookies.emit)
-        self.login_btn.clicked.connect(self.request_open_cookies.emit)
+        self.login_btn.clicked.connect(self.request_naver_login.emit)
         auth_layout.addWidget(self.cookie_btn)
         auth_layout.addWidget(self.login_btn)
         self.auth_container.hide()

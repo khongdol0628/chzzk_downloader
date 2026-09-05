@@ -30,6 +30,7 @@ class TaskListWidget(QWidget):
     """작업 목록 및 빈 상태 안내를 관리하는 위젯."""
 
     request_open_settings = pyqtSignal()
+    request_naver_login = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -99,6 +100,7 @@ class TaskListWidget(QWidget):
 
         card.delete_requested.connect(_on_delete)
         card.request_open_cookies.connect(self.request_open_settings.emit)
+        card.request_naver_login.connect(self.request_naver_login.emit)
         self.refresh_state()
         return item
 
@@ -157,6 +159,7 @@ class MainWindow(QMainWindow):
         # 3. 작업 목록 영역 (URL 입력칸 하단)
         self.task_list_widget = TaskListWidget(self)
         self.task_list_widget.request_open_settings.connect(self._on_settings_clicked)
+        self.task_list_widget.request_naver_login.connect(self._on_naver_login_clicked)
         self.task_list = self.task_list_widget.list_widget
         self.empty_label = self.task_list_widget.empty_label
         main_layout.addWidget(self.task_list_widget)
@@ -177,8 +180,27 @@ class MainWindow(QMainWindow):
             self._settings_window.close()
         super().closeEvent(event)
 
+    def _on_naver_login_clicked(self) -> None:
+        """네이버 로그인 버튼 클릭 시 내장 브라우저 로그인 창을 엽니다."""
+        from chzzk_downloader.gui.naver_login_dialog import NaverLoginDialog
+
+        dialog = NaverLoginDialog(self)
+        dialog.login_success.connect(self._on_naver_login_success)
+        dialog.exec()
+
+    def _on_naver_login_success(self, msg: str) -> None:
+        """네이버 로그인 완료 시 토스트 안내, 설정창 갱신 및 실패 카드 자동 재분석."""
+        self.toast.show_toast(
+            "네이버 로그인이 완료되었습니다.",
+            ToastType.SUCCESS,
+            auto_dismiss_ms=SUCCESS_TOAST_DURATION_MS,
+        )
+        if hasattr(self, "_settings_window") and self._settings_window is not None:
+            self._settings_window.refresh_status()
+        self._on_cookies_updated()
+
     def _on_settings_clicked(self) -> None:
-        """설정 버튼 또는 카드 내 쿠키 설정/로그인 클릭 핸들러 (Modeless 설정 창 오픈)."""
+        """설정 버튼 또는 카드 내 쿠키 설정 클릭 핸들러 (Modeless 설정 창 오픈)."""
         from chzzk_downloader.gui.settings_window import SettingsWindow
 
         if not hasattr(self, "_settings_window") or self._settings_window is None:

@@ -2,6 +2,7 @@
 
 import re
 from pathlib import Path
+from typing import Any
 
 from chzzk_downloader.config import DEFAULT_COOKIE_FILE_PATH
 
@@ -207,11 +208,24 @@ def extract_chrome_cookies(
 
         jar = extract_cookies_from_browser("chrome")
     except Exception as e:
+        err_msg = str(e)
+        if (
+            "Could not copy" in err_msg
+            or "Permission denied" in err_msg
+            or "7271" in err_msg
+        ):
+            return (
+                False,
+                "Chrome 브라우저가 현재 실행 중이어서 쿠키 데이터베이스가 잠겨 있습니다.\n\n"
+                "해결 방법:\n"
+                "1. [네이버 로그인] 버튼을 클릭하여 내장 브라우저에서 간편하게 로그인 (권장)\n"
+                "2. Chrome 브라우저(트레이 아이콘 및 백그라운드 포함)를 완전히 종료한 후 다시 시도\n"
+                "3. 브라우저 확장 프로그램으로 내보낸 쿠키 파일(*.txt)을 [쿠키 파일 불러오기]로 등록",
+            )
         return (
             False,
-            f"Chrome 브라우저 쿠키 추출 실패: {e}\n\n"
-            "※ Chrome 브라우저가 실행 중이면 완전히 종료 후 다시 시도하시거나,\n"
-            "   [쿠키 파일 불러오기] 또는 [보기 / 직접 입력]을 이용해 주세요.",
+            f"Chrome 브라우저 쿠키 추출 실패: {err_msg}\n\n"
+            "※ Chrome 브라우저 종료 후 다시 시도하시거나, [네이버 로그인] 또는 [쿠키 파일 불러오기]를 이용해 주세요.",
         )
 
     # naver.com 도메인 쿠키만 선별
@@ -248,6 +262,78 @@ def extract_chrome_cookies(
         return (
             True,
             f"Chrome 브라우저에서 네이버 쿠키를 성공적으로 가져왔습니다 ({', '.join(found)}).",
+        )
+    except Exception as e:
+        return False, f"쿠키 파일 쓰기 오류: {e}"
+
+
+def save_network_cookies(
+    cookies: list[Any],
+    cookie_path: Path | None = None,
+) -> tuple[bool, str]:
+    """QNetworkCookie 목록에서 네이버 쿠키를 추출하여 Netscape 파일로 저장합니다."""
+    netscape_lines = [
+        "# Netscape HTTP Cookie File",
+        "# Extracted from Naver Login by Chzzk Downloader",
+    ]
+    found_auth: list[str] = []
+    seen: set[str] = set()
+
+    for c in cookies:
+        try:
+            name = (
+                c.name().data().decode("utf-8", errors="ignore")
+                if hasattr(c, "name")
+                else getattr(c, "name", "")
+            )
+            value = (
+                c.value().data().decode("utf-8", errors="ignore")
+                if hasattr(c, "value")
+                else getattr(c, "value", "")
+            )
+            domain = c.domain() if hasattr(c, "domain") else getattr(c, "domain", "")
+            path = (c.path() if hasattr(c, "path") else getattr(c, "path", "/")) or "/"
+            is_secure = (
+                c.isSecure()
+                if hasattr(c, "isSecure")
+                else getattr(c, "is_secure", False)
+            )
+        except Exception:
+            continue
+
+        if "naver.com" not in domain or not name or not value:
+            continue
+
+        if not domain.startswith("."):
+            domain = f".{domain}"
+
+        if name in seen:
+            continue
+        seen.add(name)
+
+        if name in ("NID_AUT", "NID_SES") and name not in found_auth:
+            found_auth.append(name)
+
+        secure_str = "TRUE" if is_secure else "FALSE"
+        # 기본 만료일: 영구 보관용 2038년
+        netscape_lines.append(
+            f"{domain}\tTRUE\t{path}\t{secure_str}\t2147483647\t{name}\t{value}"
+        )
+
+    if not found_auth:
+        return (
+            False,
+            "네이버 로그인 인증 쿠키(NID_AUT 또는 NID_SES)가 감지되지 않았습니다.",
+        )
+
+    content = "\n".join(netscape_lines) + "\n"
+    target_path = cookie_path or get_cookie_file_path()
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(content, encoding="utf-8")
+        return (
+            True,
+            f"네이버 로그인이 완료되어 쿠키가 저장되었습니다 ({', '.join(found_auth)}).",
         )
     except Exception as e:
         return False, f"쿠키 파일 쓰기 오류: {e}"
