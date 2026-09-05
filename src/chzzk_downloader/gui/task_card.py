@@ -4,6 +4,7 @@ import urllib.request
 from enum import Enum
 from typing import Any
 
+from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QSize, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QEnterEvent, QPixmap
 from PyQt6.QtWidgets import (
@@ -16,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from chzzk_downloader.config import DEFAULT_USER_AGENT
+from chzzk_downloader.core.url_parser import parse_chzzk_vod_url
 from chzzk_downloader.core.ytdlp import VodInfo
 
 
@@ -72,13 +74,20 @@ class TaskCardWidget(QFrame):
         raw_url: str,
         status: TaskStatus = TaskStatus.ANALYZING,
         vod_info: VodInfo | None = None,
+        video_no: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.raw_url = raw_url
         self.status = status
         self.vod_info = vod_info
+        self.video_no = (
+            video_no
+            or (vod_info.video_no if vod_info else "")
+            or (parse_chzzk_vod_url(raw_url) or "")
+        )
         self.error_message: str = ""
+        self.is_deleted: bool = False
         self._thumb_loader: ThumbnailLoaderThread | None = None
 
         self._init_ui()
@@ -197,17 +206,37 @@ class TaskCardWidget(QFrame):
         super().leaveEvent(event)
         self.delete_btn.hide()
 
-    def closeEvent(self, event: Any) -> None:  # noqa: N802
+    def deleteLater(self) -> None:  # noqa: N802
+        self.is_deleted = True
         if self._thumb_loader is not None and self._thumb_loader.isRunning():
+            try:
+                self._thumb_loader.loaded.disconnect()
+            except Exception:
+                pass
+            self._thumb_loader.quit()
+            self._thumb_loader.wait()
+        super().deleteLater()
+
+    def closeEvent(self, event: Any) -> None:  # noqa: N802
+        self.is_deleted = True
+        if self._thumb_loader is not None and self._thumb_loader.isRunning():
+            try:
+                self._thumb_loader.loaded.disconnect()
+            except Exception:
+                pass
             self._thumb_loader.quit()
             self._thumb_loader.wait()
         super().closeEvent(event)
 
     def _load_thumbnail(self, url: str) -> None:
         """비동기로 썸네일 이미지를 다운로드하여 라벨에 표시합니다."""
-        if not url:
+        if not url or self.is_deleted:
             return
         if self._thumb_loader is not None and self._thumb_loader.isRunning():
+            try:
+                self._thumb_loader.loaded.disconnect()
+            except Exception:
+                pass
             self._thumb_loader.quit()
             self._thumb_loader.wait()
         self._thumb_loader = ThumbnailLoaderThread(url, parent=self)
@@ -216,6 +245,10 @@ class TaskCardWidget(QFrame):
 
     def _on_thumbnail_loaded(self, img_bytes: bytes) -> None:
         """다운로드된 썸네일 바이트를 QPixmap으로 변환하여 표시합니다."""
+        if self.is_deleted or sip.isdeleted(self):
+            return
+        if not hasattr(self, "thumb_label") or sip.isdeleted(self.thumb_label):
+            return
         pixmap = QPixmap()
         if pixmap.loadFromData(img_bytes):
             scaled = pixmap.scaled(

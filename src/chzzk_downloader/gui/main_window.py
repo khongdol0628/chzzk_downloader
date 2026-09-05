@@ -1,5 +1,6 @@
 """메인 윈도우 모듈."""
 
+from PyQt6 import sip
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QAction, QCloseEvent, QResizeEvent
 from PyQt6.QtWidgets import (
@@ -56,6 +57,29 @@ class TaskListWidget(QWidget):
             self.stack.setCurrentWidget(self.empty_label)
         else:
             self.stack.setCurrentWidget(self.list_widget)
+
+    def get_all_cards(self) -> list[TaskCardWidget]:
+        """현재 목록에 등록되어 있는 모든 TaskCardWidget 목록을 반환합니다."""
+        cards: list[TaskCardWidget] = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item is not None:
+                widget = self.list_widget.itemWidget(item)
+                if isinstance(widget, TaskCardWidget):
+                    cards.append(widget)
+        return cards
+
+    def has_task(self, video_no: str | None, raw_url: str) -> bool:
+        """주어진 video_no 또는 raw_url을 가진 작업 카드가 이미 존재하는지 확인합니다."""
+        clean_raw = raw_url.strip()
+        for card in self.get_all_cards():
+            if card.is_deleted or sip.isdeleted(card):
+                continue
+            if video_no and card.video_no and card.video_no == video_no:
+                return True
+            if card.raw_url.strip() == clean_raw:
+                return True
+        return False
 
     def add_task_card(self, card: TaskCardWidget) -> QListWidgetItem:
         """작업 카드를 목록 최상단에 추가하고 표시 상태를 갱신합니다."""
@@ -242,6 +266,15 @@ class MainWindow(QMainWindow):
 
         video_no = parse_chzzk_vod_url(raw_url)
 
+        # 동일 영상 중복 방지 (T0105 옵션 A)
+        if self.task_list_widget.has_task(video_no, raw_url):
+            self.toast.show_toast(
+                "이미 추가한 작업입니다.",
+                ToastType.ERROR,
+                auto_dismiss_ms=SUCCESS_TOAST_DURATION_MS,
+            )
+            return
+
         if not video_no:
             # 유효하지 않은 URL: 작업 목록에 빨간색 실패 카드 즉시 추가
             card = TaskCardWidget(
@@ -295,8 +328,14 @@ class MainWindow(QMainWindow):
     ) -> None:
         """VOD 정보 조회 성공 처리: 해당 카드에 메타데이터 반영."""
         self.current_vod_info = info
-        if card is not None:
-            card.update_with_vod_info(info)
+        if (
+            card is None
+            or card.is_deleted
+            or sip.isdeleted(card)
+            or card not in self.task_list_widget.get_all_cards()
+        ):
+            return
+        card.update_with_vod_info(info)
 
     def _on_vod_check_failed(
         self,
@@ -305,6 +344,14 @@ class MainWindow(QMainWindow):
         raw_url: str = "",
     ) -> None:
         """VOD 정보 조회 실패 시 카드 상태 갱신 및 동일 문구의 실패 토스트(2초 자동 소멸)를 표시합니다."""
+        if (
+            card is None
+            or card.is_deleted
+            or sip.isdeleted(card)
+            or card not in self.task_list_widget.get_all_cards()
+        ):
+            return
+
         err_lower = error_msg.lower()
         if (
             "login" in err_lower
@@ -323,8 +370,7 @@ class MainWindow(QMainWindow):
             status = TaskStatus.FAILED_INVALID
             toast_msg = f"Invalid: {raw_url}"
 
-        if card is not None:
-            card.set_failed(status, error_msg)
+        card.set_failed(status, error_msg)
 
         self.toast.show_toast(
             toast_msg,
