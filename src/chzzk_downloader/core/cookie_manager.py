@@ -1,12 +1,28 @@
-"""치지직/네이버 쿠키 관리 모듈 (T0106)."""
-
+import json
 import re
+import urllib.error
+import urllib.request
+from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from chzzk_downloader.config import DEFAULT_COOKIE_FILE_PATH
 
+
+class SessionStatus(Enum):
+    """쿠키 세션 실시간 인증 상태."""
+
+    VALID = "VALID"
+    EXPIRED = "EXPIRED"
+    INVALID = "INVALID"
+    NETWORK_ERROR = "NETWORK_ERROR"
+    NO_COOKIES = "NO_COOKIES"
+
+
 _custom_cookie_path: Path | None = None
+_last_session_status: SessionStatus = SessionStatus.NO_COOKIES
+_last_session_message: str = "등록된 쿠키 없음"
 
 
 def set_custom_cookie_path(path: Path | None) -> None:
@@ -108,6 +124,13 @@ def save_cookies_text(text: str, cookie_path: Path | None = None) -> tuple[bool,
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(content, encoding="utf-8")
+        keys = []
+        if "NID_AUT" in content:
+            keys.append("NID_AUT")
+        if "NID_SES" in content:
+            keys.append("NID_SES")
+        key_str = ", ".join(keys) if keys else "유효 쿠키"
+        set_last_session_status(SessionStatus.VALID, f"쿠키 등록됨 ({key_str} 확인)")
         return True, msg
     except Exception as e:
         return False, f"쿠키 파일 저장 실패: {e}"
@@ -158,12 +181,15 @@ def export_cookie_file(
 
 def clear_cookies(cookie_path: Path | None = None) -> None:
     """저장된 쿠키 파일을 삭제하여 초기화합니다."""
+    global _last_session_status, _last_session_message
     target_path = cookie_path or get_cookie_file_path()
     if target_path.is_file():
         try:
             target_path.unlink()
         except Exception:
             pass
+    _last_session_status = SessionStatus.NO_COOKIES
+    _last_session_message = "등록된 쿠키 없음"
 
 
 def has_valid_cookies(cookie_path: Path | None = None) -> bool:
@@ -178,25 +204,50 @@ def has_valid_cookies(cookie_path: Path | None = None) -> bool:
         return False
 
 
+def get_last_session_status() -> tuple[SessionStatus, str]:
+    """최근 세션 검증 결과 상태와 메시지를 반환합니다."""
+    return _last_session_status, _last_session_message
+
+
+def set_last_session_status(status: SessionStatus, message: str) -> None:
+    """세션 검증 상태와 메시지를 갱신합니다."""
+    global _last_session_status, _last_session_message
+    _last_session_status = status
+    _last_session_message = message
+
+
 def get_cookie_status_summary(cookie_path: Path | None = None) -> str:
     """현재 쿠키 상태에 대한 사용자 친화적인 요약 문구를 반환합니다."""
     target_path = cookie_path or get_cookie_file_path()
     if not target_path.is_file():
         return "등록된 쿠키 없음"
 
+    if _last_session_status == SessionStatus.EXPIRED:
+        return "쿠키 만료됨 (재로그인 필요)"
+
     try:
         content = target_path.read_text(encoding="utf-8")
         has_aut = "NID_AUT" in content
         has_ses = "NID_SES" in content
-        if has_aut and has_ses:
-            return "쿠키 등록됨 (NID_AUT, NID_SES 확인)"
-        if has_aut:
-            return "쿠키 등록됨 (NID_AUT 확인)"
-        if has_ses:
-            return "쿠키 등록됨 (NID_SES 확인)"
-        return "유효하지 않은 쿠키 파일"
     except Exception:
         return "쿠키 파일 읽기 오류"
+
+    if not (has_aut or has_ses):
+        return "유효하지 않은 쿠키 파일"
+
+    if (
+        _last_session_status == SessionStatus.VALID
+        and "최근 확인" in _last_session_message
+    ):
+        return _last_session_message
+
+    if has_aut and has_ses:
+        return "쿠키 등록됨 (NID_AUT, NID_SES 확인)"
+    if has_aut:
+        return "쿠키 등록됨 (NID_AUT 확인)"
+    if has_ses:
+        return "쿠키 등록됨 (NID_SES 확인)"
+    return "유효하지 않은 쿠키 파일"
 
 
 def _to_str(val: Any) -> str:
@@ -282,9 +333,114 @@ def save_network_cookies(
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(content, encoding="utf-8")
+        found_auth_str = ", ".join(found_auth)
+        set_last_session_status(
+            SessionStatus.VALID, f"쿠키 등록됨 ({found_auth_str} 확인)"
+        )
         return (
             True,
             f"네이버 로그인이 완료되어 쿠키가 저장되었습니다 ({', '.join(found_auth)}).",
         )
     except Exception as e:
         return False, f"쿠키 파일 쓰기 오류: {e}"
+
+
+def get_cookie_dict(cookie_path: Path | None = None) -> dict[str, str]:
+    """저장된 쿠키 파일에서 키-값 딕셔너리를 추출합니다."""
+    target_path = cookie_path or get_cookie_file_path()
+    if not target_path.is_file():
+        return {}
+
+    try:
+        content = target_path.read_text(encoding="utf-8")
+    except Exception:
+        return {}
+
+    cookies: dict[str, str] = {}
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 7:
+            name, value = parts[5].strip(), parts[6].strip()
+            if name and value:
+                cookies[name] = value
+
+    if not cookies:
+        for m in re.finditer(r"([A-Za-z0-9_]+)=([^;]+)", content):
+            cookies[m.group(1).strip()] = m.group(2).strip()
+
+    return cookies
+
+
+def verify_cookie_session(
+    cookie_path: Path | None = None,
+    timeout: float = 3.0,
+) -> tuple[SessionStatus, str]:
+    """치지직 API를 호출하여 저장된 네이버 로그인 쿠키의 실제 유효성을 검증합니다.
+
+    Returns:
+        (SessionStatus, status_message)
+    """
+    cookie_dict = get_cookie_dict(cookie_path)
+    if not ("NID_AUT" in cookie_dict or "NID_SES" in cookie_dict):
+        status = SessionStatus.NO_COOKIES
+        msg = "등록된 쿠키 없음"
+        set_last_session_status(status, msg)
+        return status, msg
+
+    cookie_header = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
+    req = urllib.request.Request(
+        "https://api.chzzk.naver.com/service/v1/users/me",
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+            ),
+            "Cookie": cookie_header,
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="ignore")
+            data = json.loads(body)
+            code = data.get("code")
+            if code == 200:
+                content = data.get("content") or {}
+                nickname = content.get("nickname", "")
+                now_str = datetime.now().strftime("%H:%M")
+                msg = (
+                    f"쿠키 등록됨 (NID_AUT, NID_SES 확인 · 최근 확인: {now_str})"
+                    if not nickname
+                    else f"쿠키 등록됨 ({nickname} · 최근 확인: {now_str})"
+                )
+                set_last_session_status(SessionStatus.VALID, msg)
+                return SessionStatus.VALID, msg
+            else:
+                msg = "쿠키 만료됨 (재로그인 필요)"
+                set_last_session_status(SessionStatus.EXPIRED, msg)
+                return SessionStatus.EXPIRED, msg
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            status = SessionStatus.EXPIRED
+            msg = "쿠키 만료됨 (재로그인 필요)"
+        elif e.code in (400, 403):
+            status = SessionStatus.INVALID
+            msg = f"유효하지 않은 쿠키 (HTTP {e.code})"
+        else:
+            status = SessionStatus.NETWORK_ERROR
+            msg = f"서버 오류 (HTTP {e.code})"
+        set_last_session_status(status, msg)
+        return status, msg
+    except (urllib.error.URLError, TimeoutError, OSError):
+        status = SessionStatus.NETWORK_ERROR
+        msg = "네트워크 연결 실패 (확인 불가)"
+        set_last_session_status(status, msg)
+        return status, msg
+    except Exception as e:
+        status = SessionStatus.NETWORK_ERROR
+        msg = f"인증 확인 실패: {e}"
+        set_last_session_status(status, msg)
+        return status, msg

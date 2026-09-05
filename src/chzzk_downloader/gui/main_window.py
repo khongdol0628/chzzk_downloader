@@ -170,6 +170,10 @@ class MainWindow(QMainWindow):
         # 4. 오버레이 토스트 위젯
         self.toast = ToastWidget(self)
 
+        # 5. 세션 검증 비동기 작업자 및 앱 시작 시 검증 트리거 (T0107)
+        self._cookie_verify_worker: Any = None
+        self._check_cookie_session_on_startup()
+
     def resizeEvent(self, event: QResizeEvent | None) -> None:  # noqa: N802
         super().resizeEvent(event)
         if hasattr(self, "toast") and self.toast.isVisible():
@@ -184,9 +188,52 @@ class MainWindow(QMainWindow):
                 w.quit()
                 w.wait()
         self._recheck_workers.clear()
+        if (
+            hasattr(self, "_cookie_verify_worker")
+            and self._cookie_verify_worker is not None
+            and self._cookie_verify_worker.isRunning()
+        ):
+            try:
+                self._cookie_verify_worker.finished_verification.disconnect()
+            except Exception:
+                pass
+            self._cookie_verify_worker.quit()
+            self._cookie_verify_worker.wait(300)
         if hasattr(self, "_settings_window") and self._settings_window is not None:
             self._settings_window.close()
         super().closeEvent(event)
+
+    def _check_cookie_session_on_startup(self) -> None:
+        """앱 시작 시 저장된 쿠키가 존재하면 백그라운드 1회 세션 검증을 수행합니다 (T0107)."""
+        from chzzk_downloader.core.cookie_manager import has_valid_cookies
+
+        if not has_valid_cookies():
+            return
+
+        from chzzk_downloader.gui.workers import CookieVerifyWorker
+
+        self._cookie_verify_worker = CookieVerifyWorker(timeout=3.0, parent=self)
+        self._cookie_verify_worker.finished_verification.connect(
+            self._on_cookie_session_verified
+        )
+        self._cookie_verify_worker.start()
+
+    def _on_cookie_session_verified(self, status: Any, msg: str) -> None:
+        """세션 검증 완료 핸들러 (정상 시 침묵, 만료 시 액션 토스트 노출)."""
+        from chzzk_downloader.core.cookie_manager import SessionStatus
+
+        if hasattr(self, "_settings_window") and self._settings_window is not None:
+            self._settings_window.refresh_status()
+
+        if status == SessionStatus.EXPIRED:
+            # 사용자 지정 순서: [쿠키 설정] -> [네이버 로그인]
+            self.toast.show_action_toast(
+                "저장된 네이버 로그인 쿠키가 만료되었습니다.",
+                buttons=[
+                    ("쿠키 설정", "#3b82f6", self._on_settings_clicked),
+                    ("네이버 로그인", "#03c75a", self._on_naver_login_clicked),
+                ],
+            )
 
     def _on_naver_login_clicked(self) -> None:
         """네이버 로그인 버튼 클릭 시 내장 브라우저 로그인 창을 엽니다."""

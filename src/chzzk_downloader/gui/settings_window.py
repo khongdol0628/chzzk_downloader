@@ -113,9 +113,22 @@ class SettingsWindow(QDialog):
 
     def refresh_status(self) -> None:
         """현재 쿠키 상태에 따라 라벨과 스타일을 갱신합니다."""
+        from chzzk_downloader.core.cookie_manager import (
+            SessionStatus,
+            get_last_session_status,
+        )
+
+        status, _ = get_last_session_status()
         summary = get_cookie_status_summary()
         self.status_label.setText(f"상태: {summary}")
-        if "확인" in summary:
+
+        if status == SessionStatus.EXPIRED:
+            self.status_label.setStyleSheet(
+                "color: #ef4444; font-size: 12px; font-weight: bold;"
+            )
+            self.export_btn.setEnabled(True)
+            self.clear_btn.setEnabled(True)
+        elif "확인" in summary or status == SessionStatus.VALID:
             self.status_label.setStyleSheet(
                 "color: #10b981; font-size: 12px; font-weight: bold;"
             )
