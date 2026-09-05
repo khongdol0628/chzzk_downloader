@@ -8,6 +8,11 @@ SUCCESS_TOAST_DURATION_MS: int = 2000
 # 치지직 API 기본 엔드포인트
 CHZZK_API_BASE_URL: str = "https://api.chzzk.naver.com"
 
+# 네이버 게임 / 치지직 유저 상태 검증 API 엔드포인트
+NAVER_GAME_USER_STATUS_URL: str = (
+    "https://comm-api.game.naver.com/nng_main/v1/user/getUserStatus"
+)
+
 # 기본 User-Agent
 DEFAULT_USER_AGENT: str = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

@@ -7,7 +7,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from chzzk_downloader.config import DEFAULT_COOKIE_FILE_PATH
+from chzzk_downloader.config import (
+    DEFAULT_COOKIE_FILE_PATH,
+    DEFAULT_USER_AGENT,
+    NAVER_GAME_USER_STATUS_URL,
+)
 
 
 class SessionStatus(Enum):
@@ -392,12 +396,9 @@ def verify_cookie_session(
 
     cookie_header = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
     req = urllib.request.Request(
-        "https://api.chzzk.naver.com/service/v1/users/me",
+        NAVER_GAME_USER_STATUS_URL,
         headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-            ),
+            "User-Agent": DEFAULT_USER_AGENT,
             "Cookie": cookie_header,
         },
     )
@@ -407,8 +408,10 @@ def verify_cookie_session(
             body = resp.read().decode("utf-8", errors="ignore")
             data = json.loads(body)
             code = data.get("code")
-            if code == 200:
-                content = data.get("content") or {}
+            content = data.get("content") or {}
+            logged_in = content.get("loggedIn")
+            # 네이버 게임 유저 API는 세션 만료 시 loggedIn이 False로 반환됨
+            if code == 200 and logged_in is not False:
                 nickname = content.get("nickname", "")
                 now_str = datetime.now().strftime("%H:%M")
                 msg = (
@@ -423,10 +426,10 @@ def verify_cookie_session(
                 set_last_session_status(SessionStatus.EXPIRED, msg)
                 return SessionStatus.EXPIRED, msg
     except urllib.error.HTTPError as e:
-        if e.code == 401:
+        if e.code in (401, 403):
             status = SessionStatus.EXPIRED
             msg = "쿠키 만료됨 (재로그인 필요)"
-        elif e.code in (400, 403):
+        elif e.code == 400:
             status = SessionStatus.INVALID
             msg = f"유효하지 않은 쿠키 (HTTP {e.code})"
         else:

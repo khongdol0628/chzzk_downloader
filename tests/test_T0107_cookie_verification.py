@@ -67,7 +67,7 @@ def test_verify_cookie_session_expired_401(setup_test_cookie_path):
     save_cookies_text("NID_AUT=aut_expired; NID_SES=ses_expired")
 
     err = urllib.error.HTTPError(
-        url="https://api.chzzk.naver.com/service/v1/users/me",
+        url="https://comm-api.game.naver.com/nng_main/v1/user/getUserStatus",
         code=401,
         msg="Unauthorized",
         hdrs={},  # type: ignore[arg-type]
@@ -80,6 +80,25 @@ def test_verify_cookie_session_expired_401(setup_test_cookie_path):
         assert "만료됨" in msg
 
         # 요약에도 만료 반영 확인
+        summary = get_cookie_status_summary()
+        assert "만료됨" in summary
+
+
+def test_verify_cookie_session_logged_in_false(setup_test_cookie_path):
+    """API 응답은 200이나 loggedIn이 false인 경우 세션 만료(EXPIRED) 처리 검증."""
+    save_cookies_text("NID_AUT=aut_expired; NID_SES=ses_expired")
+
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = json.dumps(
+        {"code": 200, "content": {"loggedIn": False, "nickname": None}}
+    ).encode("utf-8")
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        status, msg = verify_cookie_session()
+        assert status == SessionStatus.EXPIRED
+        assert "만료됨" in msg
+
         summary = get_cookie_status_summary()
         assert "만료됨" in summary
 
@@ -186,7 +205,7 @@ def test_main_window_startup_verification_expired_shows_action_toast(
     save_cookies_text("NID_AUT=expired_aut; NID_SES=expired_ses")
 
     err = urllib.error.HTTPError(
-        url="https://api.chzzk.naver.com/service/v1/users/me",
+        url="https://comm-api.game.naver.com/nng_main/v1/user/getUserStatus",
         code=401,
         msg="Unauthorized",
         hdrs={},  # type: ignore[arg-type]
