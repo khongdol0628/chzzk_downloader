@@ -86,7 +86,7 @@
   - Naver Neonplayer Single-file DASH(KeyError sourceURL/media) 오류를 자체적으로 우회 처리하여 실제 치지직 VOD 메타데이터가 정상 추출된다.
   - 쿠키/로그인 필요(401 Unauthorized) VOD에 대해 `Login required; Please login: {입력 URL}` 상태 및 전용 UI가 올바르게 작동한다.
 
-## T0105. VOD 분석 진행·취소·오류 및 중복 방지 [완료]
+## T0105. VOD 분석 진행·취소·오류 및 중복 방지 (Merge Blocker & 중복 방지) [완료]
 
 - **입력:** 분석 중 취소 버튼(✕), 동일 VOD URL 재입력 또는 네트워크·인증·삭제·비공개 오류.
 - **동작:**
