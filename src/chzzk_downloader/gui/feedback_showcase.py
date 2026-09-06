@@ -253,7 +253,6 @@ class FeedbackShowcaseWindow(QMainWindow):
         self._log("[M01] 다운로드 중지 확인 모달 호출 대기...")
         ok = ask_confirm_dialog(
             parent=self,
-            title="다운로드 중지 확인",
             text="정말 중지하시겠습니까?",
         )
         self._log(
@@ -264,7 +263,6 @@ class FeedbackShowcaseWindow(QMainWindow):
         self._log("[M02] 작업 재다운로드 확인 모달 호출 대기...")
         ok = ask_confirm_dialog(
             parent=self,
-            title="작업 중복 확인",
             text="이미 추가한 작업입니다. 다시 다운로드하시겠습니까?",
         )
         self._log(
@@ -275,7 +273,6 @@ class FeedbackShowcaseWindow(QMainWindow):
         self._log("[M03] 쿠키 초기화 확인 모달 (Danger 빨간 강조) 호출 대기...")
         ok = ask_confirm_dialog(
             parent=self,
-            title="쿠키 초기화",
             text="저장된 쿠키를 삭제하시겠습니까?",
             is_danger=True,
         )
@@ -309,7 +306,7 @@ class FeedbackShowcaseWindow(QMainWindow):
         self._log("[M05/M06] 쿠키 안내 모달 호출")
         QMessageBox.information(
             self,
-            "불러오기 완료",
+            "Chzzk Downloader",
             "쿠키 파일에서 2개의 쿠키를 성공적으로 불러왔습니다.",
         )
         self._log("[M05/M06] 안내 모달 닫힘")
@@ -318,11 +315,10 @@ class FeedbackShowcaseWindow(QMainWindow):
         self._log("[M07] 폴더 권한 오류 경고 모달 호출")
         QMessageBox.warning(
             self,
-            "폴더 오류",
+            "Chzzk Downloader",
             "선택한 폴더에 쓰기 권한이 없습니다:\nC:\\System\\Restricted\n\n다른 폴더를 선택해주세요.",
         )
         self._log("[M07] 경고 모달 닫힘")
-
 
 
 def main() -> None:

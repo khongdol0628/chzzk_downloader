@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import chzzk_downloader.gui.feedback_showcase
 from chzzk_downloader.gui.dialogs import create_confirm_box
 from chzzk_downloader.gui.feedback_showcase import FeedbackShowcaseWindow
 from chzzk_downloader.gui.toast import ToastType, ToastWidget
@@ -116,3 +117,52 @@ def test_feedback_showcase_window_initialization(qtbot):
 
     window._demo_toast_reanalyze_success()
     assert "[T02] 쿠키 재분석 안내 토스트 호출" in window.log_edit.toPlainText()
+
+
+def test_feedback_showcase_modals_use_unified_title(qtbot, monkeypatch):
+    """피드백 쇼케이스 창의 모든 모달 호출 시 'Chzzk Downloader' 타이틀이 사용되는지 검증."""
+    from PyQt6.QtWidgets import QMessageBox
+
+    window = FeedbackShowcaseWindow()
+    qtbot.addWidget(window)
+
+    captured_titles: list[str] = []
+
+    # 1) ask_confirm_dialog 검증 (M01, M02, M03)
+    def mock_ask(parent=None, text="", title="Chzzk Downloader", **kwargs):
+        captured_titles.append(title)
+        return True
+
+    monkeypatch.setattr(
+        chzzk_downloader.gui.feedback_showcase, "ask_confirm_dialog", mock_ask
+    )
+
+    window._demo_modal_stop_download()
+    window._demo_modal_redownload_duplicate()
+    window._demo_modal_clear_cookie()
+
+    # 2) QMessageBox.information / warning 검증 (M05, M07)
+    def mock_info(parent, title, text, *args, **kwargs):
+        captured_titles.append(title)
+
+    def mock_warning(parent, title, text, *args, **kwargs):
+        captured_titles.append(title)
+
+    monkeypatch.setattr(QMessageBox, "information", mock_info)
+    monkeypatch.setattr(QMessageBox, "warning", mock_warning)
+
+    window._demo_modal_cookie_info()
+    window._demo_modal_folder_error()
+
+    # 3) M04 파일 충돌 모달 검증
+    def mock_exec(self):
+        captured_titles.append(self.windowTitle())
+        return 0
+
+    monkeypatch.setattr(QMessageBox, "exec", mock_exec)
+    window._demo_modal_file_conflict()
+
+    # 모든 모달의 창 제목이 "Chzzk Downloader"인지 검증
+    assert len(captured_titles) == 6
+    for title in captured_titles:
+        assert title == "Chzzk Downloader", f"쇼케이스 모달 타이틀 불일치: {title}"

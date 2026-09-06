@@ -324,7 +324,6 @@ class SettingsWindow(QDialog):
                 f"경로 갱신 중 예외가 발생했습니다: {e}",
             )
 
-
     def _on_quality_changed(self, text: str) -> None:
         """기본 화질 콤보박스 변경 핸들러: 변경 즉시 영속화."""
         if text:
