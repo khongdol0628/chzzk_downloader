@@ -457,10 +457,14 @@ class TaskCardWidget(QFrame):
             self.thumb_label.setPixmap(scaled)
             self.thumb_label.setText("")
 
-    def _populate_qualities(self) -> None:
+    def _populate_qualities(self, force_default: bool = False) -> None:
         """vod_info.formats 기반으로 실제 제공 가능한 화질 목록을 구성하고 설정의 기본 화질을 우선 선택합니다."""
         self.quality_combo.blockSignals(True)
-        current_sel = self.selected_quality or self.quality_combo.currentText()
+        current_sel = (
+            ""
+            if force_default
+            else (self.selected_quality or self.quality_combo.currentText())
+        )
         self.quality_combo.clear()
 
         if not self.vod_info or not self.vod_info.formats:
@@ -492,7 +496,7 @@ class TaskCardWidget(QFrame):
         default_pref = settings.default_quality
         matched_quality = match_default_quality(qualities, default_pref)
 
-        if current_sel in qualities:
+        if current_sel and current_sel in qualities:
             self.quality_combo.setCurrentText(current_sel)
         else:
             self.quality_combo.setCurrentText(matched_quality)
@@ -598,11 +602,24 @@ class TaskCardWidget(QFrame):
         return True
 
     def reset_for_redownload(self) -> None:
-        """동일 VOD 재입력 시 이전 세션 리소스 정리 및 클린 리셋 (충돌 방어)."""
+        """동일 VOD 재입력 시 이전 세션 리소스 정리 및 클린 리셋 (충돌 방어 및 최신 설정 반영)."""
         if self.status in (TaskStatus.DOWNLOADING, TaskStatus.STOPPED):
             self.status = TaskStatus.READY
         self.error_message = ""
         self.selected_quality = ""
+        self.custom_download_dir = None
+        self.target_path = None
+        self.quality_combo.blockSignals(True)
+        self.quality_combo.clear()
+        self.quality_combo.blockSignals(False)
+
+        # 최신 환경설정의 기본 확장자 반영
+        settings = get_current_settings()
+        if settings.file_extension in AVAILABLE_EXTENSIONS:
+            self.ext_combo.blockSignals(True)
+            self.ext_combo.setCurrentText(settings.file_extension)
+            self.ext_combo.blockSignals(False)
+
         self.status = TaskStatus.ANALYZING
         self._update_display()
         self._apply_style()
@@ -728,11 +745,13 @@ class TaskCardWidget(QFrame):
         self.status = TaskStatus.READY
         self.vod_info = info
         self.video_no = info.video_no or self.video_no
-        self._populate_qualities()
+        self._populate_qualities(force_default=True)
         # 설정의 기본 확장자 반영
         settings = get_current_settings()
         if settings.file_extension in AVAILABLE_EXTENSIONS:
+            self.ext_combo.blockSignals(True)
             self.ext_combo.setCurrentText(settings.file_extension)
+            self.ext_combo.blockSignals(False)
         self._update_display()
         self._apply_style()
         if info.thumbnail_url:

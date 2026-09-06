@@ -574,3 +574,67 @@ def test_vod_auto_download_on_downloads_with_settings_default_quality_and_extens
         # 4. 다운로드 파일명이 설정의 기본 확장자(.ts)로 지정됨
         assert card.target_path is not None
         assert card.target_path.suffix == ".ts"
+
+
+# 15. 중단된 작업에 대해 설정을 변경하고 동일 URL 재입력 시 최신 변경 설정을 따르는지 검증
+def test_stopped_vod_redownload_applies_new_settings_quality_and_extension(
+    main_window, qtbot
+):
+    """URL 입력 -> 설정에서 기본화질/확장자 변경 -> 작업 중단 -> 동일 URL 재시작 시 최신 설정을 따르는지 검증."""
+    # 1. 초기 설정: 1080p, .mp4, 자동 다운로드 OFF
+    update_current_settings(
+        vod_auto_download=False,
+        default_quality="1080p",
+        file_extension=".mp4",
+    )
+
+    mock_vod = VodInfo(
+        video_no="15016450",
+        video_title="재시작 설정 변경 테스트",
+        channel_name="스트리머A",
+        duration=3600,
+        formats=[
+            VodFormatInfo(format_id="1080p", height=1080, fps=60.0),
+            VodFormatInfo(format_id="720p", height=720, fps=30.0),
+            VodFormatInfo(format_id="480p", height=480, fps=30.0),
+        ],
+    )
+
+    with patch("chzzk_downloader.gui.workers.extract_vod_info", return_value=mock_vod):
+        test_url = "https://chzzk.naver.com/video/15016450"
+
+        # 첫 번째 입력
+        main_window.url_input.setText(test_url)
+        main_window.download_btn.click()
+        qtbot.waitUntil(lambda: main_window.download_btn.isEnabled(), timeout=2000)
+
+        card = main_window.task_list_widget.get_all_cards()[0]
+        assert card.status == TaskStatus.READY
+        assert card.quality_combo.currentText() == "1080p60"
+        assert card.ext_combo.currentText() == ".mp4"
+        assert "1080p60" in card.status_label.text()
+
+        # 2. 작업 중단 (STOPPED)
+        card.status = TaskStatus.STOPPED
+        card._update_display()
+        assert card.status == TaskStatus.STOPPED
+
+        # 3. 환경설정에서 기본 화질을 '720p', 기본 확장자를 '.ts'로 변경
+        update_current_settings(
+            vod_auto_download=False,
+            default_quality="720p",
+            file_extension=".ts",
+        )
+
+        # 4. 동일 URL을 다시 입력하여 재다운로드 승인
+        with patch.object(main_window, "_confirm_redownload_dialog", return_value=True):
+            main_window.url_input.setText(test_url)
+            main_window.download_btn.click()
+            qtbot.waitUntil(lambda: main_window.download_btn.isEnabled(), timeout=2000)
+
+            # 5. 재시작된 카드의 4번 위치가 이전 설정(1080p, .mp4)이 아닌 최신 변경 설정(720p, .ts)을 따르는지 검증
+            assert card.status == TaskStatus.READY
+            assert card.quality_combo.currentText() == "720p"
+            assert card.ext_combo.currentText() == ".ts"
+            assert "720p" in card.status_label.text()
+            assert card.selected_quality == "720p"
