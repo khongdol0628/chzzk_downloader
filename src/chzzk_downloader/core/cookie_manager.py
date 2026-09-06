@@ -127,7 +127,15 @@ def save_cookies_text(text: str, cookie_path: Path | None = None) -> tuple[bool,
 
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            target_path.parent.chmod(0o700)
+        except OSError:
+            pass
         target_path.write_text(content, encoding="utf-8")
+        try:
+            target_path.chmod(0o600)
+        except OSError:
+            pass
         keys = []
         if "NID_AUT" in content:
             keys.append("NID_AUT")
@@ -183,17 +191,22 @@ def export_cookie_file(
         return False, f"내보내기 실패: {e}"
 
 
-def clear_cookies(cookie_path: Path | None = None) -> None:
-    """저장된 쿠키 파일을 삭제하여 초기화합니다."""
+def clear_cookies(cookie_path: Path | None = None) -> tuple[bool, str]:
+    """저장된 쿠키 파일을 삭제하여 초기화합니다.
+
+    Returns:
+        (success, message)
+    """
     global _last_session_status, _last_session_message
     target_path = cookie_path or get_cookie_file_path()
     if target_path.is_file():
         try:
             target_path.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            return False, f"쿠키 파일 삭제 실패: {e}"
     _last_session_status = SessionStatus.NO_COOKIES
     _last_session_message = "등록된 쿠키 없음"
+    return True, "등록된 쿠키가 삭제되었습니다."
 
 
 def has_valid_cookies(cookie_path: Path | None = None) -> bool:
@@ -336,7 +349,15 @@ def save_network_cookies(
     target_path = cookie_path or get_cookie_file_path()
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            target_path.parent.chmod(0o700)
+        except OSError:
+            pass
         target_path.write_text(content, encoding="utf-8")
+        try:
+            target_path.chmod(0o600)
+        except OSError:
+            pass
         found_auth_str = ", ".join(found_auth)
         set_last_session_status(
             SessionStatus.VALID, f"쿠키 등록됨 ({found_auth_str} 확인)"

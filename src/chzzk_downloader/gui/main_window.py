@@ -3,7 +3,7 @@
 from typing import Any
 
 from PyQt6 import sip
-from PyQt6.QtCore import QPoint, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QCloseEvent, QResizeEvent
 from PyQt6.QtWidgets import (
     QApplication,
@@ -26,6 +26,8 @@ from chzzk_downloader.core.ytdlp import VodInfo
 from chzzk_downloader.gui.task_card import TaskCardWidget, TaskStatus
 from chzzk_downloader.gui.toast import ToastType, ToastWidget
 from chzzk_downloader.gui.workers import VodCheckWorker
+
+_DETACHED_WORKERS: set[QThread] = set()
 
 
 class TaskListWidget(QWidget):
@@ -181,13 +183,44 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802
         if self._worker is not None and self._worker.isRunning():
+            try:
+                self._worker.finished_success.disconnect()
+            except Exception:
+                pass
+            try:
+                self._worker.finished_failed.disconnect()
+            except Exception:
+                pass
+            self._worker.setParent(None)
             self._worker.quit()
-            self._worker.wait()
-        for w in self._recheck_workers:
+            self._worker.wait(100)
+            if self._worker.isRunning():
+                w_ref = self._worker
+                w_ref.finished.connect(lambda ref=w_ref: _DETACHED_WORKERS.discard(ref))
+                _DETACHED_WORKERS.add(w_ref)
+            self._worker = None
+
+        for w in list(self._recheck_workers):
             if w.isRunning():
+                try:
+                    w.finished_success.disconnect()
+                except Exception:
+                    pass
+                try:
+                    w.finished_failed.disconnect()
+                except Exception:
+                    pass
+                w.setParent(None)
                 w.quit()
-                w.wait()
+                w.wait(100)
+                if w.isRunning():
+                    rw_ref = w
+                    rw_ref.finished.connect(
+                        lambda ref=rw_ref: _DETACHED_WORKERS.discard(ref)
+                    )
+                    _DETACHED_WORKERS.add(rw_ref)
         self._recheck_workers.clear()
+
         if (
             hasattr(self, "_cookie_verify_worker")
             and self._cookie_verify_worker is not None
@@ -197,8 +230,17 @@ class MainWindow(QMainWindow):
                 self._cookie_verify_worker.finished_verification.disconnect()
             except Exception:
                 pass
+            self._cookie_verify_worker.setParent(None)
             self._cookie_verify_worker.quit()
-            self._cookie_verify_worker.wait(300)
+            self._cookie_verify_worker.wait(100)
+            if self._cookie_verify_worker.isRunning():
+                vw_ref = self._cookie_verify_worker
+                vw_ref.finished.connect(
+                    lambda ref=vw_ref: _DETACHED_WORKERS.discard(ref)
+                )
+                _DETACHED_WORKERS.add(vw_ref)
+            self._cookie_verify_worker = None
+
         if hasattr(self, "_settings_window") and self._settings_window is not None:
             self._settings_window.close()
         super().closeEvent(event)
@@ -212,7 +254,7 @@ class MainWindow(QMainWindow):
 
         from chzzk_downloader.gui.workers import CookieVerifyWorker
 
-        self._cookie_verify_worker = CookieVerifyWorker(timeout=3.0, parent=self)
+        self._cookie_verify_worker = CookieVerifyWorker(timeout=3.0, parent=None)
         self._cookie_verify_worker.finished_verification.connect(
             self._on_cookie_session_verified
         )
@@ -293,7 +335,7 @@ class MainWindow(QMainWindow):
             card.status = TaskStatus.ANALYZING
             card._update_display()
             card._apply_style()
-            worker = VodCheckWorker(card.video_no or card.raw_url, parent=self)
+            worker = VodCheckWorker(card.video_no or card.raw_url, parent=None)
             self._recheck_workers.append(worker)
 
             def _on_success(
@@ -454,7 +496,7 @@ class MainWindow(QMainWindow):
         )
 
         self.download_btn.setEnabled(False)
-        worker = VodCheckWorker(video_no, parent=self)
+        worker = VodCheckWorker(video_no, parent=None)
         worker.finished_success.connect(
             lambda info, c=card: self._on_vod_check_success(info, c)
         )

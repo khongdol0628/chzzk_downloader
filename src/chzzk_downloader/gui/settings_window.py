@@ -205,9 +205,12 @@ class SettingsWindow(QDialog):
             QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            clear_cookies()
-            self.refresh_status()
-            self.cookies_updated.emit()
-            QMessageBox.information(
-                self, "초기화 완료", "등록된 쿠키가 삭제되었습니다."
-            )
+            ok, msg = clear_cookies()
+            if ok:
+                self.refresh_status()
+                self.cookies_updated.emit()
+                QMessageBox.information(
+                    self, "초기화 완료", "등록된 쿠키가 삭제되었습니다."
+                )
+            else:
+                QMessageBox.warning(self, "초기화 실패", msg)

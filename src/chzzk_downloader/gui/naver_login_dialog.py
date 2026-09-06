@@ -169,8 +169,6 @@ class NaverLoginDialog(QDialog):
                     "font-size: 11px; color: #10b981; font-weight: bold;"
                 )
                 self.save_btn.setEnabled(True)
-                # 감지 즉시 파일에 선제 저장 (Write-Through)하여 비정상 종료 시에도 쿠키 보존
-                save_network_cookies(list(self._collected_cookies.values()))
 
     def _on_url_changed(self, url: QUrl) -> None:
         """페이지 이동 시 로그인 완료 여부를 확인합니다."""
