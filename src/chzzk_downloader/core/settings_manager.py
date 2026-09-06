@@ -21,13 +21,15 @@ class AppSettings:
     download_dir: Path
     default_quality: str = "최고 화질"
     file_extension: str = ".mp4"
+    vod_auto_download: bool = True
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         """JSON 직렬화를 위한 딕셔너리로 변환합니다."""
         return {
             "download_dir": str(self.download_dir),
             "default_quality": self.default_quality,
             "file_extension": self.file_extension,
+            "vod_auto_download": self.vod_auto_download,
         }
 
     @classmethod
@@ -40,7 +42,13 @@ class AppSettings:
         ext = data.get("file_extension", ".mp4")
         if ext not in AVAILABLE_EXTENSIONS:
             ext = ".mp4"
-        return cls(download_dir=d_dir, default_quality=quality, file_extension=ext)
+        auto_dl = bool(data.get("vod_auto_download", True))
+        return cls(
+            download_dir=d_dir,
+            default_quality=quality,
+            file_extension=ext,
+            vod_auto_download=auto_dl,
+        )
 
 
 _custom_settings_path: Path | None = None
@@ -187,6 +195,7 @@ def update_current_settings(
     download_dir: Path | str | None = None,
     default_quality: str | None = None,
     file_extension: str | None = None,
+    vod_auto_download: bool | None = None,
 ) -> tuple[bool, str]:
     """현재 전역 설정을 갱신하고 영속화합니다."""
     current = get_current_settings()
@@ -210,10 +219,17 @@ def update_current_settings(
             return False, f"지원하지 않는 파일 확장자입니다: {file_extension}"
         new_ext = file_extension
 
+    new_auto = (
+        current.vod_auto_download
+        if vod_auto_download is None
+        else bool(vod_auto_download)
+    )
+
     updated = AppSettings(
         download_dir=new_dir,
         default_quality=new_quality,
         file_extension=new_ext,
+        vod_auto_download=new_auto,
     )
     if save_settings(updated):
         return True, "설정이 성공적으로 저장되었습니다."

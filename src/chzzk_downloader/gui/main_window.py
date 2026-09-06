@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -76,17 +77,23 @@ class TaskListWidget(QWidget):
                     cards.append(widget)
         return cards
 
-    def has_task(self, video_no: str | None, raw_url: str) -> bool:
-        """주어진 video_no 또는 raw_url을 가진 작업 카드가 이미 존재하는지 확인합니다."""
+    def find_task_card(
+        self, video_no: str | None, raw_url: str
+    ) -> TaskCardWidget | None:
+        """주어진 video_no 또는 raw_url을 가진 작업 카드를 찾아 반환합니다."""
         clean_raw = raw_url.strip()
         for card in self.get_all_cards():
             if card.is_deleted or sip.isdeleted(card):
                 continue
             if video_no and card.video_no and card.video_no == video_no:
-                return True
+                return card
             if card.raw_url.strip() == clean_raw:
-                return True
-        return False
+                return card
+        return None
+
+    def has_task(self, video_no: str | None, raw_url: str) -> bool:
+        """주어진 video_no 또는 raw_url을 가진 작업 카드가 이미 존재하는지 확인합니다."""
+        return self.find_task_card(video_no, raw_url) is not None
 
     def add_task_card(self, card: TaskCardWidget) -> QListWidgetItem:
         """작업 카드를 목록 최상단에 추가하고 표시 상태를 갱신합니다."""
@@ -435,8 +442,33 @@ class MainWindow(QMainWindow):
                 self.url_input.setText(text)
                 self.download_btn.click()
 
+    def _start_vod_check(self, card: TaskCardWidget, video_no: str) -> None:
+        """지정된 카드에 대해 VOD 메타데이터 비동기 조회를 시작합니다."""
+        self.download_btn.setEnabled(False)
+        worker = VodCheckWorker(video_no, parent=None)
+        worker.finished_success.connect(
+            lambda info, c=card: self._on_vod_check_success(info, c)
+        )
+        worker.finished_failed.connect(
+            lambda err, c=card, u=card.raw_url: self._on_vod_check_failed(err, c, u)
+        )
+        worker.finished.connect(lambda: self.download_btn.setEnabled(True))
+        self._worker = worker
+        worker.start()
+
+    def _confirm_redownload_dialog(self) -> bool:
+        """동일 VOD 재다운로드 확인 모달을 띄우고 승인 여부를 반환합니다."""
+        reply = QMessageBox.question(
+            self,
+            "작업 중복 확인",
+            "이미 추가한 작업입니다. 다시 다운로드하시겠습니까?",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        return reply == QMessageBox.StandardButton.Ok
+
     def _on_download_clicked(self) -> None:
-        """다운로드 버튼 클릭 핸들러 (T0104: 작업 카드 즉시 추가, VOD 판별 및 비동기 정보 조회)."""
+        """다운로드 버튼 클릭 핸들러 (T0104, T0109)."""
         # 새로운 요청 시작 시 기존 토스트 즉시 닫기
         self.toast.dismiss()
 
@@ -450,13 +482,16 @@ class MainWindow(QMainWindow):
 
         video_no = parse_chzzk_vod_url(raw_url)
 
-        # 동일 영상 중복 방지 (T0105 옵션 A)
-        if self.task_list_widget.has_task(video_no, raw_url):
-            self.toast.show_toast(
-                "이미 추가한 작업입니다.",
-                ToastType.ERROR,
-                auto_dismiss_ms=SUCCESS_TOAST_DURATION_MS,
-            )
+        # 동일 작업 재다운로드 확인 및 충돌 방어 (T0109)
+        existing_card = self.task_list_widget.find_task_card(video_no, raw_url)
+        if existing_card is not None:
+            if self._confirm_redownload_dialog():
+                # 이전 세션 워커/스레드 및 파일 핸들 정리, 클린 리셋
+                existing_card.reset_for_redownload()
+                if video_no:
+                    self._start_vod_check(existing_card, video_no)
+                else:
+                    existing_card.set_failed(TaskStatus.FAILED_INVALID, "Invalid URL")
             return
 
         if not video_no:
@@ -495,22 +530,12 @@ class MainWindow(QMainWindow):
             auto_dismiss_ms=SUCCESS_TOAST_DURATION_MS,
         )
 
-        self.download_btn.setEnabled(False)
-        worker = VodCheckWorker(video_no, parent=None)
-        worker.finished_success.connect(
-            lambda info, c=card: self._on_vod_check_success(info, c)
-        )
-        worker.finished_failed.connect(
-            lambda err, c=card, u=raw_url: self._on_vod_check_failed(err, c, u)
-        )
-        worker.finished.connect(lambda: self.download_btn.setEnabled(True))
-        self._worker = worker
-        worker.start()
+        self._start_vod_check(card, video_no)
 
     def _on_vod_check_success(
         self, info: VodInfo, card: TaskCardWidget | None = None
     ) -> None:
-        """VOD 정보 조회 성공 처리: 해당 카드에 메타데이터 반영."""
+        """VOD 정보 조회 성공 처리: 해당 카드에 메타데이터 반영 및 자동 다운로드 분기."""
         self.current_vod_info = info
         if (
             card is None
@@ -520,6 +545,13 @@ class MainWindow(QMainWindow):
         ):
             return
         card.update_with_vod_info(info)
+
+        # VOD 자동 다운로드 분기 (T0109)
+        from chzzk_downloader.core.settings_manager import get_current_settings
+
+        settings = get_current_settings()
+        if settings.vod_auto_download:
+            card.trigger_start_download()
 
     def _on_vod_check_failed(
         self,

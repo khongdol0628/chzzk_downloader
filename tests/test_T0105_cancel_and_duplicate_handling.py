@@ -7,7 +7,6 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
-from chzzk_downloader.config import SUCCESS_TOAST_DURATION_MS
 from chzzk_downloader.core.ytdlp import (
     VodFormatInfo,
     VodInfo,
@@ -118,7 +117,7 @@ def test_reproduce_and_defend_deleted_card_thumbnail_loaded(qtbot):
 
 
 def test_duplicate_valid_vod_url_blocked(main_window, qtbot):
-    """동일한 치지직 VOD URL 중복 입력 시 카드 생성을 차단하고 '이미 추가한 작업입니다.' 토스트를 노출하는지 검증."""
+    """동일한 치지직 VOD URL 중복 입력 시 재다운로드 모달에서 취소하면 카드 생성을 차단하는지 검증."""
     mock_vod = VodInfo(
         video_no="15016450",
         video_title="중복 테스트 방송",
@@ -138,25 +137,25 @@ def test_duplicate_valid_vod_url_blocked(main_window, qtbot):
 
         assert main_window.task_list_widget.list_widget.count() == 1
 
-        # 2. 동일한 VOD URL 두 번째 입력 -> 중복 차단
-        main_window.url_input.setText(f"  {test_url}  ")
-        qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
+        # 2. 동일한 VOD URL 두 번째 입력 시 확인 모달에서 '취소(False)' 선택
+        with patch.object(
+            main_window, "_confirm_redownload_dialog", return_value=False
+        ) as mock_confirm:
+            main_window.url_input.setText(f"  {test_url}  ")
+            qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
 
-        # 입력칸은 즉시 비워짐
-        assert main_window.url_input.text() == ""
+            # 재다운로드 모달이 호출되었는지 확인
+            assert mock_confirm.called is True
 
-        # 목록 카드 개수는 여전히 1개로 유지 (중복 생성 차단)
-        assert main_window.task_list_widget.list_widget.count() == 1
+            # 입력칸은 즉시 비워짐
+            assert main_window.url_input.text() == ""
 
-        # 중복 안내 토스트 노출 및 2초 자동 소멸 확인
-        assert main_window.toast.isHidden() is False
-        assert "이미 추가한 작업입니다." in main_window.toast.label.text()
-        assert main_window.toast._timer.isActive() is True
-        assert main_window.toast._timer.interval() == SUCCESS_TOAST_DURATION_MS
+            # 목록 카드 개수는 여전히 1개로 유지 (중복 생성 차단)
+            assert main_window.task_list_widget.list_widget.count() == 1
 
 
 def test_duplicate_invalid_url_blocked(main_window, qtbot):
-    """동일한 유효하지 않은 URL 중복 입력 시에도 카드 중복 생성을 차단하는지 검증."""
+    """동일한 유효하지 않은 URL 중복 입력 시에도 확인 모달 취소 시 카드 중복 생성을 차단하는지 검증."""
     invalid_url = "https://example.com/not-a-vod"
 
     # 1. 첫 번째 입력 -> Invalid 카드 추가
@@ -165,14 +164,16 @@ def test_duplicate_invalid_url_blocked(main_window, qtbot):
 
     assert main_window.task_list_widget.list_widget.count() == 1
 
-    # 2. 동일한 잘못된 URL 재입력 -> 중복 차단
-    main_window.url_input.setText(invalid_url)
-    qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
+    # 2. 동일한 잘못된 URL 재입력 -> 확인 모달 취소 시 중복 차단
+    with patch.object(
+        main_window, "_confirm_redownload_dialog", return_value=False
+    ) as mock_confirm:
+        main_window.url_input.setText(invalid_url)
+        qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
 
-    assert main_window.url_input.text() == ""
-    assert main_window.task_list_widget.list_widget.count() == 1
-    assert main_window.toast.isHidden() is False
-    assert "이미 추가한 작업입니다." in main_window.toast.label.text()
+        assert mock_confirm.called is True
+        assert main_window.url_input.text() == ""
+        assert main_window.task_list_widget.list_widget.count() == 1
 
 
 def test_deleted_card_can_be_readded_after_deletion(main_window, qtbot):
@@ -206,4 +207,4 @@ def test_deleted_card_can_be_readded_after_deletion(main_window, qtbot):
 
         assert main_window.task_list_widget.list_widget.count() == 1
         readded_card = main_window.task_list_widget.get_all_cards()[0]
-        assert readded_card.status == TaskStatus.READY
+        assert readded_card.status in (TaskStatus.READY, TaskStatus.DOWNLOADING)

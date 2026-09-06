@@ -2,21 +2,30 @@
 
 import urllib.request
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from PyQt6 import sip
-from PyQt6.QtCore import QEvent, QSize, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QEnterEvent, QPixmap
+from PyQt6.QtCore import QEvent, QSize, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QEnterEvent, QPainter, QPaintEvent, QPen, QPixmap
 from PyQt6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from chzzk_downloader.config import DEFAULT_USER_AGENT
+from chzzk_downloader.core.filename_generator import (
+    generate_vod_filename,
+    resolve_duplicate_filename,
+)
+from chzzk_downloader.core.settings_manager import get_current_settings
 from chzzk_downloader.core.url_parser import parse_chzzk_vod_url
 from chzzk_downloader.core.ytdlp import VodInfo
 
@@ -26,8 +35,47 @@ class TaskStatus(Enum):
 
     ANALYZING = "ANALYZING"
     READY = "READY"
+    DOWNLOADING = "DOWNLOADING"
     FAILED_INVALID = "FAILED_INVALID"
     FAILED_LOGIN_REQUIRED = "FAILED_LOGIN_REQUIRED"
+
+
+class SpinnerWidget(QWidget):
+    """버퍼링 회전 인디케이터 위젯."""
+
+    def __init__(self, size: int = 14, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._size = size
+        self.setFixedSize(size, size)
+        self._angle = 0
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._rotate)
+
+    def _rotate(self) -> None:
+        self._angle = (self._angle + 30) % 360
+        self.update()
+
+    def start(self) -> None:
+        if not self._timer.isActive():
+            self._timer.start(60)
+
+    def stop(self) -> None:
+        if self._timer.isActive():
+            self._timer.stop()
+        self._angle = 0
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent | None) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = self.rect().adjusted(2, 2, -2, -2)
+        pen = QPen(QColor("#9ca3af"), 2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        start_angle = -self._angle * 16
+        span_angle = 270 * 16
+        painter.drawArc(rect, start_angle, span_angle)
+        painter.end()
 
 
 def format_duration(seconds: int) -> str:
@@ -70,6 +118,8 @@ class TaskCardWidget(QFrame):
     delete_requested = pyqtSignal()
     request_open_cookies = pyqtSignal()
     request_naver_login = pyqtSignal()
+    download_started = pyqtSignal()
+    download_stopped = pyqtSignal()
 
     def __init__(
         self,
@@ -92,7 +142,13 @@ class TaskCardWidget(QFrame):
         self.is_deleted: bool = False
         self._thumb_loader: ThumbnailLoaderThread | None = None
 
+        self.custom_download_dir: Path | None = None
+        self.target_path: Path | None = None
+        self.selected_quality: str = ""
+
         self._init_ui()
+        if self.vod_info:
+            self._populate_qualities()
         self._update_display()
         self._apply_style()
 
@@ -142,8 +198,6 @@ class TaskCardWidget(QFrame):
         top_row.addWidget(self.title_label, stretch=1)
 
         # 2번 위치 (우상단): 회색조 액션 아이콘 그룹 (삭제 ✕ 버튼)
-        # 마우스 진입(Hover) 시 노출되나, 숨김 시에도 공간을 예약(setRetainSizeWhenHidden)하여
-        # 1번 위치 텍스트의 줄바꿈 위치가 흔들리지 않도록 유지
         self.delete_btn = QPushButton("✕", self)
         self.delete_btn.setToolTip("목록에서 제거")
         self.delete_btn.setFixedSize(24, 24)
@@ -162,13 +216,19 @@ class TaskCardWidget(QFrame):
         info_layout.addLayout(top_row)
         info_layout.addStretch()
 
-        # 하단 행: 4번 위치(좌하단 인증 액션) + 3번 위치(우하단 상태 요약)
+        # 하단 행: 4번 위치(좌하단 컨트롤) + 3번 위치(우하단 상태 요약)
         bottom_row = QHBoxLayout()
         bottom_row.setContentsMargins(0, 0, 0, 0)
         bottom_row.setSpacing(8)
 
-        # 4번 위치 (좌하단): 인증 필요 시 노출되는 액션 영역
-        self.auth_container = QWidget(self)
+        # 4번 위치 (좌하단): 인증/대기/다운로드 중 상태별 인터랙션 컨테이너
+        self.action_container = QWidget(self)
+        action_layout = QHBoxLayout(self.action_container)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(6)
+
+        # 4-1. 인증 필요 컨테이너
+        self.auth_container = QWidget(self.action_container)
         auth_layout = QHBoxLayout(self.auth_container)
         auth_layout.setContentsMargins(0, 0, 0, 0)
         auth_layout.setSpacing(6)
@@ -191,7 +251,86 @@ class TaskCardWidget(QFrame):
         auth_layout.addWidget(self.login_btn)
         self.auth_container.hide()
 
-        bottom_row.addWidget(self.auth_container)
+        # 4-2. 다운로드 대기 컨테이너 ([최고화질 드롭다운] [기본 확장자] [📁] [▶])
+        self.ready_container = QWidget(self.action_container)
+        ready_layout = QHBoxLayout(self.ready_container)
+        ready_layout.setContentsMargins(0, 0, 0, 0)
+        ready_layout.setSpacing(6)
+
+        self.quality_combo = QComboBox(self.ready_container)
+        self.quality_combo.setFixedHeight(22)
+        self.quality_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.quality_combo.setStyleSheet(
+            "QComboBox { background-color: #2a2a2a; color: #f3f4f6; border: 1px solid #4b5563; border-radius: 3px; padding: 1px 6px; font-size: 11px; }"
+            "QComboBox::drop-down { border: none; width: 14px; }"
+            "QComboBox QAbstractItemView { background-color: #1e1e1e; color: #f3f4f6; selection-background-color: #3b82f6; border: 1px solid #4b5563; outline: none; }"
+        )
+        self.quality_combo.currentTextChanged.connect(self._on_quality_selected)
+
+        self.ext_label = QLabel(".mp4", self.ready_container)
+        self.ext_label.setStyleSheet(
+            "color: #9ca3af; font-size: 11px; font-weight: 500;"
+        )
+
+        self.folder_btn = QPushButton("📁", self.ready_container)
+        self.folder_btn.setToolTip("저장 폴더 변경")
+        self.folder_btn.setFixedSize(22, 22)
+        self.folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.folder_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; font-size: 12px; }"
+            "QPushButton:hover { background-color: #374151; border-radius: 3px; }"
+        )
+        self.folder_btn.clicked.connect(self._on_change_folder_clicked)
+
+        self.start_btn = QPushButton("▶", self.ready_container)
+        self.start_btn.setToolTip("다운로드 시작")
+        self.start_btn.setFixedSize(22, 22)
+        self.start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.start_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: #3b82f6; border: none; font-size: 12px; font-weight: bold; }"
+            "QPushButton:hover { background-color: rgba(59, 130, 246, 0.2); border-radius: 3px; }"
+        )
+        self.start_btn.clicked.connect(self.trigger_start_download)
+
+        ready_layout.addWidget(self.quality_combo)
+        ready_layout.addWidget(self.ext_label)
+        ready_layout.addWidget(self.folder_btn)
+        ready_layout.addWidget(self.start_btn)
+        self.ready_container.hide()
+
+        # 4-3. 다운로드 실행 중 컨테이너 (녹화 중… + 버퍼링 회전 + ■ 중지 버튼)
+        self.downloading_container = QWidget(self.action_container)
+        downloading_layout = QHBoxLayout(self.downloading_container)
+        downloading_layout.setContentsMargins(0, 0, 0, 0)
+        downloading_layout.setSpacing(6)
+
+        self.recording_label = QLabel("녹화 중…", self.downloading_container)
+        self.recording_label.setStyleSheet(
+            "color: #ef4444; font-size: 11px; font-weight: 600;"
+        )
+
+        self.spinner = SpinnerWidget(size=14, parent=self.downloading_container)
+
+        self.stop_btn = QPushButton("■", self.downloading_container)
+        self.stop_btn.setToolTip("다운로드 중지")
+        self.stop_btn.setFixedSize(22, 22)
+        self.stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.stop_btn.setStyleSheet(
+            "QPushButton { background-color: transparent; color: #ef4444; border: none; font-size: 11px; font-weight: bold; }"
+            "QPushButton:hover { background-color: #374151; color: #f87171; border-radius: 4px; }"
+        )
+        self.stop_btn.clicked.connect(self.trigger_stop_download)
+
+        downloading_layout.addWidget(self.recording_label)
+        downloading_layout.addWidget(self.spinner)
+        downloading_layout.addWidget(self.stop_btn)
+        self.downloading_container.hide()
+
+        action_layout.addWidget(self.auth_container)
+        action_layout.addWidget(self.ready_container)
+        action_layout.addWidget(self.downloading_container)
+
+        bottom_row.addWidget(self.action_container)
         bottom_row.addStretch()
 
         # 3번 위치 (우하단): 재생 시간, 화질, 진행/실패 상태 라벨
@@ -212,6 +351,7 @@ class TaskCardWidget(QFrame):
 
     def deleteLater(self) -> None:  # noqa: N802
         self.is_deleted = True
+        self.spinner.stop()
         if self._thumb_loader is not None and self._thumb_loader.isRunning():
             try:
                 self._thumb_loader.loaded.disconnect()
@@ -223,6 +363,7 @@ class TaskCardWidget(QFrame):
 
     def closeEvent(self, event: Any) -> None:  # noqa: N802
         self.is_deleted = True
+        self.spinner.stop()
         if self._thumb_loader is not None and self._thumb_loader.isRunning():
             try:
                 self._thumb_loader.loaded.disconnect()
@@ -264,44 +405,197 @@ class TaskCardWidget(QFrame):
             self.thumb_label.setPixmap(scaled)
             self.thumb_label.setText("")
 
+    def _populate_qualities(self) -> None:
+        """vod_info.formats 기반으로 실제 제공 가능한 화질 목록을 구성합니다."""
+        self.quality_combo.blockSignals(True)
+        current_sel = self.selected_quality or self.quality_combo.currentText()
+        self.quality_combo.clear()
+
+        if not self.vod_info or not self.vod_info.formats:
+            self.quality_combo.addItem("최고 화질")
+            self.quality_combo.blockSignals(False)
+            return
+
+        seen: set[str] = set()
+        qualities: list[str] = []
+        valid_fmts = sorted(
+            [f for f in self.vod_info.formats if f.height],
+            key=lambda f: (f.height or 0, f.fps or 0),
+            reverse=True,
+        )
+        for fmt in valid_fmts:
+            fps_str = f"{int(fmt.fps)}" if fmt.fps and fmt.fps > 30 else ""
+            label = f"{fmt.height}p{fps_str}"
+            if label not in seen:
+                seen.add(label)
+                qualities.append(label)
+
+        if not qualities:
+            qualities.append("최고 화질")
+
+        self.quality_combo.addItems(qualities)
+        if current_sel in qualities:
+            self.quality_combo.setCurrentText(current_sel)
+        else:
+            self.quality_combo.setCurrentIndex(0)
+        self.selected_quality = self.quality_combo.currentText()
+        self.quality_combo.blockSignals(False)
+
+    def _on_quality_selected(self, text: str) -> None:
+        if text:
+            self.selected_quality = text
+
+    def _on_change_folder_clicked(self) -> None:
+        """📁 폴더 버튼 클릭 핸들러: 이 카드의 저장 폴더를 개별 변경합니다."""
+        settings = get_current_settings()
+        current_dir = str(self.custom_download_dir or settings.download_dir)
+        selected = QFileDialog.getExistingDirectory(self, "저장 폴더 선택", current_dir)
+        if selected:
+            self.custom_download_dir = Path(selected).resolve()
+            self.folder_btn.setToolTip(f"저장 폴더: {self.custom_download_dir}")
+
+    def _prompt_duplicate_resolution(self, filename: str) -> str:
+        """동일 파일명 존재 시 처리 방법('overwrite', 'rename', 'cancel')을 묻는 대화상자를 띄웁니다."""
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("파일 중복 확인")
+        msg_box.setText(
+            f"이미 동일한 이름의 파일이 존재합니다:\n{filename}\n\n어떻게 처리하시겠습니까?"
+        )
+        overwrite_btn = msg_box.addButton("덮어쓰기", QMessageBox.ButtonRole.AcceptRole)
+        rename_btn = msg_box.addButton("이름 변경", QMessageBox.ButtonRole.ActionRole)
+        msg_box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+        msg_box.setDefaultButton(rename_btn)
+        msg_box.exec()
+
+        clicked = msg_box.clickedButton()
+        if clicked == overwrite_btn:
+            return "overwrite"
+        elif clicked == rename_btn:
+            return "rename"
+        return "cancel"
+
+    def trigger_start_download(self) -> bool:
+        """다운로드 시작 트리거: 파일 중복 검사 후 DOWNLOADING 상태로 진입합니다."""
+        if not self.vod_info:
+            return False
+
+        settings = get_current_settings()
+        save_dir = self.custom_download_dir or settings.download_dir
+        try:
+            save_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+        ext = settings.file_extension
+        filename = generate_vod_filename(self.vod_info, ext=ext)
+        target_path = save_dir / filename
+
+        # 동일한 파일명이 이미 존재할 경우 (옵션 A)
+        if target_path.exists():
+            choice = self._prompt_duplicate_resolution(filename)
+            if choice == "overwrite":
+                final_path = target_path
+            elif choice == "rename":
+                final_path = resolve_duplicate_filename(target_path)
+            else:
+                return False
+        else:
+            final_path = target_path
+
+        self.target_path = final_path
+        if self.quality_combo.currentText():
+            self.selected_quality = self.quality_combo.currentText()
+
+        self.status = TaskStatus.DOWNLOADING
+        self._update_display()
+        self.download_started.emit()
+        return True
+
+    def trigger_stop_download(self) -> bool:
+        """다운로드 중지 트리거: 확인 모달 승인 시 안전 중단 및 상태 복귀."""
+        reply = QMessageBox.question(
+            self,
+            "다운로드 중지 확인",
+            "정말 중지하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return False
+
+        self.status = TaskStatus.READY
+        self._update_display()
+        self.download_stopped.emit()
+        return True
+
+    def reset_for_redownload(self) -> None:
+        """동일 VOD 재입력 시 이전 세션 리소스 정리 및 클린 리셋 (충돌 방어)."""
+        if self.status == TaskStatus.DOWNLOADING:
+            self.status = TaskStatus.READY
+        self.error_message = ""
+        self.status = TaskStatus.ANALYZING
+        self._update_display()
+        self._apply_style()
+
     def _update_display(self) -> None:
         """현재 상태에 따라 UI 텍스트 및 가시성을 갱신합니다."""
+        settings = get_current_settings()
+        self.ext_label.setText(settings.file_extension)
+
         if self.status == TaskStatus.ANALYZING:
-            self.title_label.setText(f"분석 중... ({self.raw_url})")
+            # 유저 요구사항: 읽는 중… URL
+            self.title_label.setText(f"읽는 중… {self.raw_url}")
             self.status_label.setText("분석 중...")
             self.auth_container.hide()
+            self.ready_container.hide()
+            self.downloading_container.hide()
+            self.spinner.stop()
             self.thumb_label.setText("분석 중")
+
         elif self.status == TaskStatus.READY:
             if self.vod_info:
                 self.title_label.setText(self.vod_info.display_name)
-                # 화질 정보 및 재생 시간
-                best_quality = ""
-                if self.vod_info.formats:
-                    valid_fmts = [f for f in self.vod_info.formats if f.height]
-                    if valid_fmts:
-                        best_fmt = max(valid_fmts, key=lambda f: f.height or 0)
-                        fps_str = (
-                            f"{int(best_fmt.fps)}"
-                            if best_fmt.fps and best_fmt.fps > 30
-                            else ""
-                        )
-                        best_quality = f"{best_fmt.height}p{fps_str}"
                 dur_str = format_duration(self.vod_info.duration)
+                quality_str = self.selected_quality or self.quality_combo.currentText()
                 self.status_label.setText(
-                    f"{best_quality} | {dur_str}" if best_quality else dur_str
+                    f"{quality_str} | {dur_str}" if quality_str else dur_str
                 )
             self.auth_container.hide()
+            self.ready_container.show()
+            self.downloading_container.hide()
+            self.spinner.stop()
             if not (self.vod_info and self.vod_info.thumbnail_url):
                 self.thumb_label.setText("VOD")
+
+        elif self.status == TaskStatus.DOWNLOADING:
+            if self.vod_info:
+                self.title_label.setText(self.vod_info.display_name)
+                dur_str = format_duration(self.vod_info.duration)
+                quality_str = self.selected_quality or self.quality_combo.currentText()
+                self.status_label.setText(
+                    f"{quality_str} | {dur_str}" if quality_str else dur_str
+                )
+            self.auth_container.hide()
+            self.ready_container.hide()
+            self.downloading_container.show()
+            self.spinner.start()
+
         elif self.status == TaskStatus.FAILED_LOGIN_REQUIRED:
             self.title_label.setText(f"Login required; Please login: {self.raw_url}")
             self.status_label.setText("로그인 필요")
             self.auth_container.show()
+            self.ready_container.hide()
+            self.downloading_container.hide()
+            self.spinner.stop()
             self.thumb_label.setText("인증 필요")
+
         elif self.status == TaskStatus.FAILED_INVALID:
             self.title_label.setText(f"Invalid: {self.raw_url}")
             self.status_label.setText(self.error_message or "분석 실패")
             self.auth_container.hide()
+            self.ready_container.hide()
+            self.downloading_container.hide()
+            self.spinner.stop()
             self.thumb_label.setText("✕")
 
     def _apply_style(self) -> None:
@@ -348,6 +642,8 @@ class TaskCardWidget(QFrame):
         """yt-dlp VOD 분석 완료 시 메타데이터를 반영하여 준비 완료 상태로 갱신합니다."""
         self.status = TaskStatus.READY
         self.vod_info = info
+        self.video_no = info.video_no or self.video_no
+        self._populate_qualities()
         self._update_display()
         self._apply_style()
         if info.thumbnail_url:

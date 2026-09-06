@@ -100,11 +100,25 @@ class SettingsWindow(QDialog):
         opts_row.addStretch()
         general_layout.addLayout(opts_row)
 
+        # VOD 자동 다운로드 토글 스위치 행 (T0109)
+        from chzzk_downloader.gui.switch_widget import SwitchWidget
+
+        auto_row = QHBoxLayout()
+        auto_row.setSpacing(12)
+        auto_label = QLabel("VOD 자동 다운로드:", self.general_group)
+        auto_row.addWidget(auto_label)
+        self.auto_switch = SwitchWidget(checked=True, parent=self.general_group)
+        self.auto_switch.toggled.connect(self._on_auto_download_toggled)
+        auto_row.addWidget(self.auto_switch)
+        auto_row.addStretch()
+        general_layout.addLayout(auto_row)
+
         # 현재 설정값 UI 반영
         settings = get_current_settings()
         self.folder_input.setText(str(settings.download_dir))
         self.quality_combo.setCurrentText(settings.default_quality)
         self.ext_combo.setCurrentText(settings.file_extension)
+        self.auto_switch.setChecked(settings.vod_auto_download)
 
         layout.addWidget(self.general_group)
 
@@ -317,3 +331,7 @@ class SettingsWindow(QDialog):
         """파일 확장자 콤보박스 변경 핸들러: 변경 즉시 영속화."""
         if text:
             update_current_settings(file_extension=text)
+
+    def _on_auto_download_toggled(self, checked: bool) -> None:
+        """VOD 자동 다운로드 토글 스위치 핸들러: 변경 즉시 영속화."""
+        update_current_settings(vod_auto_download=checked)
