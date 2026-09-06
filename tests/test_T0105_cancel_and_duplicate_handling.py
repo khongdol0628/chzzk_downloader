@@ -7,6 +7,7 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
+from chzzk_downloader.config import SUCCESS_TOAST_DURATION_MS
 from chzzk_downloader.core.ytdlp import (
     VodFormatInfo,
     VodInfo,
@@ -137,21 +138,21 @@ def test_duplicate_valid_vod_url_blocked(main_window, qtbot):
 
         assert main_window.task_list_widget.list_widget.count() == 1
 
-        # 2. 동일한 VOD URL 두 번째 입력 시 확인 모달에서 '취소(False)' 선택
-        with patch.object(
-            main_window, "_confirm_redownload_dialog", return_value=False
-        ) as mock_confirm:
-            main_window.url_input.setText(f"  {test_url}  ")
-            qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
+        # 2. 동일한 VOD URL 두 번째 입력 (카드가 DOWNLOADING 상태이므로 즉시 거부 토스트 노출)
+        main_window.url_input.setText(f"  {test_url}  ")
+        qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
 
-            # 재다운로드 모달이 호출되었는지 확인
-            assert mock_confirm.called is True
+        # 입력칸은 즉시 비워짐
+        assert main_window.url_input.text() == ""
 
-            # 입력칸은 즉시 비워짐
-            assert main_window.url_input.text() == ""
+        # 목록 카드 개수는 여전히 1개로 유지 (중복 생성 차단)
+        assert main_window.task_list_widget.list_widget.count() == 1
 
-            # 목록 카드 개수는 여전히 1개로 유지 (중복 생성 차단)
-            assert main_window.task_list_widget.list_widget.count() == 1
+        # 중복 안내 토스트 노출 및 2초 자동 소멸 확인
+        assert main_window.toast.isHidden() is False
+        assert "이미 추가한 작업입니다." in main_window.toast.label.text()
+        assert main_window.toast._timer.isActive() is True
+        assert main_window.toast._timer.interval() == SUCCESS_TOAST_DURATION_MS
 
 
 def test_duplicate_invalid_url_blocked(main_window, qtbot):

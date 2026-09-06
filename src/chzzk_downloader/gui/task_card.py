@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from chzzk_downloader.config import DEFAULT_USER_AGENT
+from chzzk_downloader.config import AVAILABLE_EXTENSIONS, DEFAULT_USER_AGENT
 from chzzk_downloader.core.filename_generator import (
     generate_vod_filename,
     resolve_duplicate_filename,
@@ -36,6 +36,7 @@ class TaskStatus(Enum):
     ANALYZING = "ANALYZING"
     READY = "READY"
     DOWNLOADING = "DOWNLOADING"
+    STOPPED = "STOPPED"
     FAILED_INVALID = "FAILED_INVALID"
     FAILED_LOGIN_REQUIRED = "FAILED_LOGIN_REQUIRED"
 
@@ -267,10 +268,18 @@ class TaskCardWidget(QFrame):
         )
         self.quality_combo.currentTextChanged.connect(self._on_quality_selected)
 
-        self.ext_label = QLabel(".mp4", self.ready_container)
-        self.ext_label.setStyleSheet(
-            "color: #9ca3af; font-size: 11px; font-weight: 500;"
+        self.ext_combo = QComboBox(self.ready_container)
+        self.ext_combo.setFixedHeight(22)
+        self.ext_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ext_combo.setStyleSheet(
+            "QComboBox { background-color: #2a2a2a; color: #f3f4f6; border: 1px solid #4b5563; border-radius: 3px; padding: 1px 4px; font-size: 11px; }"
+            "QComboBox::drop-down { border: none; width: 14px; }"
+            "QComboBox QAbstractItemView { background-color: #1e1e1e; color: #f3f4f6; selection-background-color: #3b82f6; border: 1px solid #4b5563; outline: none; }"
         )
+        self.ext_combo.addItems(list(AVAILABLE_EXTENSIONS))
+        settings = get_current_settings()
+        if settings.file_extension in AVAILABLE_EXTENSIONS:
+            self.ext_combo.setCurrentText(settings.file_extension)
 
         self.folder_btn = QPushButton("📁", self.ready_container)
         self.folder_btn.setToolTip("저장 폴더 변경")
@@ -293,7 +302,7 @@ class TaskCardWidget(QFrame):
         self.start_btn.clicked.connect(self.trigger_start_download)
 
         ready_layout.addWidget(self.quality_combo)
-        ready_layout.addWidget(self.ext_label)
+        ready_layout.addWidget(self.ext_combo)
         ready_layout.addWidget(self.folder_btn)
         ready_layout.addWidget(self.start_btn)
         self.ready_container.hide()
@@ -486,7 +495,11 @@ class TaskCardWidget(QFrame):
         except Exception:
             pass
 
-        ext = settings.file_extension
+        ext = (
+            self.ext_combo.currentText()
+            if hasattr(self, "ext_combo") and self.ext_combo.currentText()
+            else settings.file_extension
+        )
         filename = generate_vod_filename(self.vod_info, ext=ext)
         target_path = save_dir / filename
 
@@ -512,7 +525,7 @@ class TaskCardWidget(QFrame):
         return True
 
     def trigger_stop_download(self) -> bool:
-        """다운로드 중지 트리거: 확인 모달 승인 시 안전 중단 및 상태 복귀."""
+        """다운로드 중지 트리거: 확인 모달 승인 시 안전 중단 및 완결(STOPPED) 상태로 전이."""
         reply = QMessageBox.question(
             self,
             "다운로드 중지 확인",
@@ -523,14 +536,15 @@ class TaskCardWidget(QFrame):
         if reply != QMessageBox.StandardButton.Yes:
             return False
 
-        self.status = TaskStatus.READY
+        # 중지된 후에는 완결된 작업으로 처리되어 4번 위치에 대기 컨트롤이 나타나지 않음
+        self.status = TaskStatus.STOPPED
         self._update_display()
         self.download_stopped.emit()
         return True
 
     def reset_for_redownload(self) -> None:
         """동일 VOD 재입력 시 이전 세션 리소스 정리 및 클린 리셋 (충돌 방어)."""
-        if self.status == TaskStatus.DOWNLOADING:
+        if self.status in (TaskStatus.DOWNLOADING, TaskStatus.STOPPED):
             self.status = TaskStatus.READY
         self.error_message = ""
         self.status = TaskStatus.ANALYZING
@@ -539,9 +553,6 @@ class TaskCardWidget(QFrame):
 
     def _update_display(self) -> None:
         """현재 상태에 따라 UI 텍스트 및 가시성을 갱신합니다."""
-        settings = get_current_settings()
-        self.ext_label.setText(settings.file_extension)
-
         if self.status == TaskStatus.ANALYZING:
             # 유저 요구사항: 읽는 중… URL
             self.title_label.setText(f"읽는 중… {self.raw_url}")
@@ -579,6 +590,24 @@ class TaskCardWidget(QFrame):
             self.ready_container.hide()
             self.downloading_container.show()
             self.spinner.start()
+
+        elif self.status == TaskStatus.STOPPED:
+            if self.vod_info:
+                self.title_label.setText(self.vod_info.display_name)
+                dur_str = format_duration(self.vod_info.duration)
+                quality_str = self.selected_quality or self.quality_combo.currentText()
+                self.status_label.setText(
+                    f"{quality_str} | 중지됨" if quality_str else "중지됨"
+                )
+            else:
+                self.status_label.setText("중지됨")
+            # 4번 위치 컨트롤 모두 숨김 (재개 불가 완결 작업)
+            self.auth_container.hide()
+            self.ready_container.hide()
+            self.downloading_container.hide()
+            self.spinner.stop()
+            if not (self.vod_info and self.vod_info.thumbnail_url):
+                self.thumb_label.setText("VOD")
 
         elif self.status == TaskStatus.FAILED_LOGIN_REQUIRED:
             self.title_label.setText(f"Login required; Please login: {self.raw_url}")

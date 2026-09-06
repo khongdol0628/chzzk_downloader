@@ -154,9 +154,9 @@ def test_task_card_title_reading_url(qtbot):
     assert card.title_label.text() == f"읽는 중… {test_url}"
 
 
-# 5. VOD 자동 다운로드 OFF 시 4번 위치 대기 컨트롤 및 개별 설정 검증
+# 5. VOD 자동 다운로드 OFF 시 4번 위치 대기 컨트롤 및 개별 설정(화질 드롭다운, 확장자 드롭다운, 폴더) 검증
 def test_vod_auto_download_off_shows_waiting_controls(main_window, qtbot):
-    """VOD 자동 다운로드가 OFF일 때 분석 완료 후 READY 상태 유지 및 4번 위치 대기 컨트롤 노출 검증."""
+    """VOD 자동 다운로드가 OFF일 때 분석 완료 후 READY 상태 유지 및 4번 위치 대기 컨트롤(화질/확장자 콤보) 노출 검증."""
     update_current_settings(vod_auto_download=False)
 
     mock_vod = VodInfo(
@@ -187,7 +187,7 @@ def test_vod_auto_download_off_shows_waiting_controls(main_window, qtbot):
         assert card.ready_container.isHidden() is False
         assert card.downloading_container.isHidden() is True
         assert card.quality_combo.currentText() == "1080p60"  # 최고화질 기본 선택
-        assert card.ext_label.text() == ".mp4"
+        assert card.ext_combo.currentText() == ".mp4"  # 확장자 드롭다운 기본값
         assert card.folder_btn.isHidden() is False
         assert card.start_btn.isHidden() is False
 
@@ -195,7 +195,11 @@ def test_vod_auto_download_off_shows_waiting_controls(main_window, qtbot):
         card.quality_combo.setCurrentText("720p")
         assert card.selected_quality == "720p"
 
-        # 4. 폴더 변경 테스트 (QFileDialog 모킹)
+        # 4. 확장자 드롭다운 변경 테스트 (.ts 선택)
+        card.ext_combo.setCurrentText(".ts")
+        assert card.ext_combo.currentText() == ".ts"
+
+        # 5. 폴더 변경 테스트 (QFileDialog 모킹)
         custom_folder = "C:/custom/download/path"
         with patch(
             "PyQt6.QtWidgets.QFileDialog.getExistingDirectory",
@@ -266,9 +270,9 @@ def test_start_download_and_file_duplicate_handling(qtbot, tmp_path):
         assert card.target_path == expected_file
 
 
-# 7. 다운로드 중지 버튼(■) 및 확인 모달 검증
+# 7. 다운로드 중지 버튼(■) 및 완결(STOPPED) 상태 전이 검증
 def test_stop_download_confirmation(qtbot, tmp_path):
-    """중지 버튼 클릭 시 모달 승인/거부에 따른 안전 중단 검증."""
+    """중지 버튼 클릭 시 모달 승인 시 STOPPED 완결 상태 전이 및 4번 위치 비노출 검증."""
     mock_vod = VodInfo(
         video_no="15016450", video_title="중지 테스트", channel_name="스트리머A"
     )
@@ -287,21 +291,53 @@ def test_stop_download_confirmation(qtbot, tmp_path):
         card.stop_btn.click()
         assert card.status == TaskStatus.DOWNLOADING
 
-    # 2. 중지 확인 모달에서 '예(Yes)' 선택 -> READY 복귀
+    # 2. 중지 확인 모달에서 '예(Yes)' 선택 -> STOPPED 완결 상태 전이 및 4번 위치 숨김
     with patch(
         "PyQt6.QtWidgets.QMessageBox.question",
         return_value=QMessageBox.StandardButton.Yes,
     ):
         card.stop_btn.click()
-        assert card.status == TaskStatus.READY
-        assert card.ready_container.isHidden() is False
+        assert card.status == TaskStatus.STOPPED
+        # 중지 후 재개 불가 완결 작업이므로 4번 위치의 모든 컨트롤 숨김
+        assert card.ready_container.isHidden() is True
         assert card.downloading_container.isHidden() is True
         assert card.spinner._timer.isActive() is False
+        assert "중지됨" in card.status_label.text()
 
 
-# 8. 동일 VOD 재입력 시 확인 모달 및 클린 리셋 무결성 검증
-def test_redownload_same_vod_clean_reset(main_window, qtbot):
-    """작업 목록에 카드가 남아있는 상태에서 동일 URL 재입력 시 확인 모달 및 클린 리셋 검증."""
+# 8. VOD가 다운로드 중인 상태에서 동일 URL 재입력 시 즉시 거부 검증
+def test_downloading_vod_rejects_duplicate_url(main_window, qtbot):
+    """VOD가 다운로드 중인 상태에서 동일 URL 입력 시 모달 없이 즉시 거부 토스트를 노출하는지 검증."""
+    update_current_settings(vod_auto_download=True)
+    mock_vod = VodInfo(
+        video_no="15016450", video_title="진행 중 테스트", channel_name="스트리머A"
+    )
+
+    with patch("chzzk_downloader.gui.workers.extract_vod_info", return_value=mock_vod):
+        test_url = "https://chzzk.naver.com/video/15016450"
+        main_window.url_input.setText(test_url)
+        qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
+        qtbot.waitUntil(lambda: main_window.download_btn.isEnabled(), timeout=2000)
+
+        card = main_window.task_list_widget.get_all_cards()[0]
+        assert card.status == TaskStatus.DOWNLOADING
+
+        # 다운로드 진행 중 동일 URL 재입력 -> 모달 호출 없이 즉시 거부 토스트
+        with patch.object(main_window, "_confirm_redownload_dialog") as mock_confirm:
+            main_window.url_input.setText(test_url)
+            qtbot.mouseClick(main_window.download_btn, Qt.MouseButton.LeftButton)
+
+            assert mock_confirm.called is False  # 모달 안 뜸
+            assert main_window.url_input.text() == ""  # 입력창 비움
+            assert main_window.toast.isHidden() is False
+            assert "이미 추가한 작업입니다." in main_window.toast.label.text()
+            assert main_window.task_list_widget.list_widget.count() == 1
+
+
+# 9. 중지(STOPPED) 상태에서 동일 VOD 재입력 시 확인 모달 및 클린 리셋 무결성 검증
+def test_redownload_stopped_vod_clean_reset(main_window, qtbot):
+    """중지된 VOD 카드가 남아있는 상태에서 동일 URL 재입력 시 확인 모달 및 클린 리셋 검증."""
+    update_current_settings(vod_auto_download=True)
     mock_vod = VodInfo(
         video_no="15016450", video_title="재다운로드 테스트", channel_name="스트리머A"
     )
@@ -313,6 +349,9 @@ def test_redownload_same_vod_clean_reset(main_window, qtbot):
         qtbot.waitUntil(lambda: main_window.download_btn.isEnabled(), timeout=2000)
 
         card = main_window.task_list_widget.get_all_cards()[0]
+        # 다운로드를 중지시켜 STOPPED 상태로 만듦
+        card.status = TaskStatus.STOPPED
+        card._update_display()
 
         # 1. 취소 선택 시 -> 카드 유지, 입력창 비움, 추가 동작 없음
         with patch.object(
@@ -323,6 +362,7 @@ def test_redownload_same_vod_clean_reset(main_window, qtbot):
 
             assert main_window.url_input.text() == ""
             assert main_window.task_list_widget.list_widget.count() == 1
+            assert card.status == TaskStatus.STOPPED
 
         # 2. 확인 선택 시 -> 클린 리셋 후 재분석/재다운로드 정상 진행
         with patch.object(main_window, "_confirm_redownload_dialog", return_value=True):
@@ -339,3 +379,84 @@ def test_redownload_same_vod_clean_reset(main_window, qtbot):
                 # 재다운로드 완료 후 목록 개수 1개 유지 및 정상 상태 확인
                 assert main_window.task_list_widget.list_widget.count() == 1
                 assert card.status in (TaskStatus.READY, TaskStatus.DOWNLOADING)
+
+
+# 10. 읽는 중(ANALYZING) 및 대기 중(READY) 상태에서 동일 URL 재입력 시 즉시 거부 검증
+def test_analyzing_and_ready_vod_rejects_duplicate_url(main_window, qtbot):
+    """읽는 중(ANALYZING) 및 대기 중(READY) 상태에서 동일 URL 재입력 시 모달 없이 즉시 거부 토스트 노출 검증."""
+    test_url = "https://chzzk.naver.com/video/15016450"
+
+    # 1. ANALYZING 상태 카드 생성
+    card = TaskCardWidget(raw_url=test_url, status=TaskStatus.ANALYZING)
+    main_window.task_list_widget.add_task_card(card)
+
+    with patch.object(main_window, "_confirm_redownload_dialog") as mock_confirm:
+        main_window.url_input.setText(test_url)
+        main_window.download_btn.click()
+
+        assert mock_confirm.called is False
+        assert main_window.url_input.text() == ""
+        assert main_window.toast.isHidden() is False
+        assert "이미 추가한 작업입니다." in main_window.toast.label.text()
+        assert main_window.task_list_widget.list_widget.count() == 1
+
+    # 2. READY 상태로 전이 후 재입력 시도
+    card.status = TaskStatus.READY
+    card._update_display()
+    main_window.toast.hide()
+
+    with patch.object(main_window, "_confirm_redownload_dialog") as mock_confirm:
+        main_window.url_input.setText(test_url)
+        main_window.download_btn.click()
+
+        assert mock_confirm.called is False
+        assert main_window.url_input.text() == ""
+        assert main_window.toast.isHidden() is False
+        assert "이미 추가한 작업입니다." in main_window.toast.label.text()
+        assert main_window.task_list_widget.list_widget.count() == 1
+
+
+# 11. 동일 URL이 아주 짧은 시간 간격으로 연속 입력(연타)되었을 때 중복 생성 즉시 차단 검증
+def test_rapid_successive_same_url_inputs_blocked(main_window, qtbot):
+    """동일 URL이 아주 짧은 시간 간격으로 연속 입력되었을 때 중복 생성을 즉시 차단하는지 검증."""
+    mock_vod = VodInfo(
+        video_no="15016450", video_title="연속 입력 테스트", channel_name="스트리머A"
+    )
+
+    with patch("chzzk_downloader.gui.workers.extract_vod_info", return_value=mock_vod):
+        test_url = "https://chzzk.naver.com/video/15016450"
+
+        # 1. 첫 번째 입력 실행
+        main_window.url_input.setText(test_url)
+        main_window._on_download_clicked()
+
+        # 작업 목록에 즉시 분석 중(ANALYZING) 카드가 등록되고 입력창 비움
+        assert main_window.url_input.text() == ""
+        assert main_window.task_list_widget.list_widget.count() == 1
+        card = main_window.task_list_widget.get_all_cards()[0]
+        assert card.status == TaskStatus.ANALYZING
+
+        # 2. 아주 짧은 시간 간격으로 동일 URL을 3회 연속 빠르게 입력 시도 (ANALYZING 도중 연타)
+        for _ in range(3):
+            main_window.url_input.setText(test_url)
+            main_window._on_download_clicked()
+
+            # 입력칸은 즉시 비워짐
+            assert main_window.url_input.text() == ""
+            # 카드 개수는 1개로 엄격히 유지 (중복 생성 원천 차단)
+            assert main_window.task_list_widget.list_widget.count() == 1
+            # 거부 토스트 출력 확인
+            assert main_window.toast.isHidden() is False
+            assert "이미 추가한 작업입니다." in main_window.toast.label.text()
+
+        # 3. 비동기 VOD 분석 완료 후(DOWNLOADING)에도 동일 URL 입력 차단 검증
+        qtbot.waitUntil(lambda: main_window.download_btn.isEnabled(), timeout=2000)
+        assert card.status == TaskStatus.DOWNLOADING
+
+        main_window.url_input.setText(test_url)
+        main_window._on_download_clicked()
+
+        assert main_window.url_input.text() == ""
+        assert main_window.task_list_widget.list_widget.count() == 1
+        assert main_window.toast.isHidden() is False
+        assert "이미 추가한 작업입니다." in main_window.toast.label.text()

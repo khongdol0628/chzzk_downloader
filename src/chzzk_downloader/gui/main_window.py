@@ -485,6 +485,20 @@ class MainWindow(QMainWindow):
         # 동일 작업 재다운로드 확인 및 충돌 방어 (T0109)
         existing_card = self.task_list_widget.find_task_card(video_no, raw_url)
         if existing_card is not None:
+            # 읽는 중(ANALYZING), 녹화 중(DOWNLOADING), 대기 중(READY) 상태인 경우 즉시 거부 토스트 출력
+            if existing_card.status in (
+                TaskStatus.ANALYZING,
+                TaskStatus.DOWNLOADING,
+                TaskStatus.READY,
+            ):
+                self.toast.show_toast(
+                    "이미 추가한 작업입니다.",
+                    ToastType.ERROR,
+                    auto_dismiss_ms=SUCCESS_TOAST_DURATION_MS,
+                )
+                return
+
+            # 중지(STOPPED) 또는 실패 등 완결 상태인 경우 재다운로드 확인 모달
             if self._confirm_redownload_dialog():
                 # 이전 세션 워커/스레드 및 파일 핸들 정리, 클린 리셋
                 existing_card.reset_for_redownload()
