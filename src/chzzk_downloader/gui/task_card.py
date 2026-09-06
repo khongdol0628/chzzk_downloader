@@ -154,7 +154,7 @@ class TaskCardWidget(QFrame):
 
     4분면 레이아웃:
     - 1번 위치 (좌상단): 작업명 / 제목 라벨
-    - 2번 위치 (우상단): 화질 라벨 + 회색조 액션 아이콘 (삭제 ✕)
+    - 2번 위치 (우상단): 회색조 액션 아이콘 (삭제 ✕)
     - 3번 위치 (우하단): 재생 시간, 화질, 진행/실패 상태 라벨
     - 4번 위치 (좌하단): 인증/대기/다운로드 중 상태별 인터랙션 컨테이너
     """
@@ -226,7 +226,7 @@ class TaskCardWidget(QFrame):
         info_layout.setContentsMargins(0, 2, 0, 2)
         info_layout.setSpacing(4)
 
-        # 상단 행: 1번 위치(좌상단 타이틀) + 2번 위치(우상단 기본 화질 및 액션 아이콘)
+        # 상단 행: 1번 위치(좌상단 타이틀) + 2번 위치(우상단 액션 아이콘)
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(8)
@@ -241,22 +241,8 @@ class TaskCardWidget(QFrame):
         self.title_label.setStyleSheet("font-size: 13px; font-weight: 600;")
         top_row.addWidget(self.title_label, stretch=1)
 
-        # 2번 위치 (우상단): 기본 화질 라벨 + 회색조 액션 아이콘 그룹 (삭제 ✕ 버튼)
-        self.top_action_container = QWidget(self)
-        top_action_layout = QHBoxLayout(self.top_action_container)
-        top_action_layout.setContentsMargins(0, 0, 0, 0)
-        top_action_layout.setSpacing(6)
-        top_action_layout.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop
-        )
-
-        self.quality_label = QLabel(self.top_action_container)
-        self.quality_label.setStyleSheet(
-            "color: #9ca3af; font-size: 11px; font-weight: 600; padding-top: 3px;"
-        )
-        top_action_layout.addWidget(self.quality_label)
-
-        self.delete_btn = QPushButton("✕", self.top_action_container)
+        # 2번 위치 (우상단): 회색조 액션 아이콘 그룹 (삭제 ✕ 버튼)
+        self.delete_btn = QPushButton("✕", self)
         self.delete_btn.setToolTip("목록에서 제거")
         self.delete_btn.setFixedSize(24, 24)
         self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -269,9 +255,7 @@ class TaskCardWidget(QFrame):
             "QPushButton:hover { background-color: rgba(239, 68, 68, 0.2); color: #ef4444; border-radius: 3px; }"
         )
         self.delete_btn.clicked.connect(self.delete_requested.emit)
-        top_action_layout.addWidget(self.delete_btn)
-
-        top_row.addWidget(self.top_action_container)
+        top_row.addWidget(self.delete_btn)
 
         info_layout.addLayout(top_row)
         info_layout.addStretch()
@@ -482,7 +466,6 @@ class TaskCardWidget(QFrame):
         if not self.vod_info or not self.vod_info.formats:
             self.quality_combo.addItem("최고 화질")
             self.selected_quality = "최고 화질"
-            self.quality_label.setText("최고 화질")
             self.quality_combo.blockSignals(False)
             return
 
@@ -515,13 +498,11 @@ class TaskCardWidget(QFrame):
             self.quality_combo.setCurrentText(matched_quality)
 
         self.selected_quality = self.quality_combo.currentText()
-        self.quality_label.setText(self.selected_quality)
         self.quality_combo.blockSignals(False)
 
     def _on_quality_selected(self, text: str) -> None:
         if text:
             self.selected_quality = text
-            self.quality_label.setText(text)
             dur_str = format_duration(self.vod_info.duration) if self.vod_info else ""
             if self.status == TaskStatus.STOPPED:
                 self.status_label.setText(f"{text} | 중지됨" if text else "중지됨")
@@ -622,7 +603,6 @@ class TaskCardWidget(QFrame):
             self.status = TaskStatus.READY
         self.error_message = ""
         self.selected_quality = ""
-        self.quality_label.setText("")
         self.status = TaskStatus.ANALYZING
         self._update_display()
         self._apply_style()
@@ -633,7 +613,6 @@ class TaskCardWidget(QFrame):
             # 유저 요구사항: 읽는 중… URL
             self.title_label.setText(f"읽는 중… {self.raw_url}")
             self.status_label.setText("분석 중...")
-            self.quality_label.setText("")
             self.auth_container.hide()
             self.ready_container.hide()
             self.downloading_container.hide()
@@ -645,7 +624,6 @@ class TaskCardWidget(QFrame):
                 self.title_label.setText(self.vod_info.display_name)
                 dur_str = format_duration(self.vod_info.duration)
                 quality_str = self.selected_quality or self.quality_combo.currentText()
-                self.quality_label.setText(quality_str)
                 self.status_label.setText(
                     f"{quality_str} | {dur_str}" if quality_str else dur_str
                 )
@@ -661,7 +639,6 @@ class TaskCardWidget(QFrame):
                 self.title_label.setText(self.vod_info.display_name)
                 dur_str = format_duration(self.vod_info.duration)
                 quality_str = self.selected_quality or self.quality_combo.currentText()
-                self.quality_label.setText(quality_str)
                 self.status_label.setText(
                     f"{quality_str} | {dur_str}" if quality_str else dur_str
                 )
@@ -675,12 +652,10 @@ class TaskCardWidget(QFrame):
                 self.title_label.setText(self.vod_info.display_name)
                 dur_str = format_duration(self.vod_info.duration)
                 quality_str = self.selected_quality or self.quality_combo.currentText()
-                self.quality_label.setText(quality_str)
                 self.status_label.setText(
                     f"{quality_str} | 중지됨" if quality_str else "중지됨"
                 )
             else:
-                self.quality_label.setText("")
                 self.status_label.setText("중지됨")
             # 4번 위치 컨트롤 모두 숨김 (재개 불가 완결 작업)
             self.auth_container.hide()
@@ -693,7 +668,6 @@ class TaskCardWidget(QFrame):
         elif self.status == TaskStatus.FAILED_LOGIN_REQUIRED:
             self.title_label.setText(f"Login required; Please login: {self.raw_url}")
             self.status_label.setText("로그인 필요")
-            self.quality_label.setText("")
             self.auth_container.show()
             self.ready_container.hide()
             self.downloading_container.hide()
@@ -703,7 +677,6 @@ class TaskCardWidget(QFrame):
         elif self.status == TaskStatus.FAILED_INVALID:
             self.title_label.setText(f"Invalid: {self.raw_url}")
             self.status_label.setText(self.error_message or "분석 실패")
-            self.quality_label.setText("")
             self.auth_container.hide()
             self.ready_container.hide()
             self.downloading_container.hide()

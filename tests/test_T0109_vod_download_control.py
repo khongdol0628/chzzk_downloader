@@ -478,11 +478,11 @@ def test_match_default_quality_helper():
     assert match_default_quality(lower_qualities, "720p") == "480p"
 
 
-# 13. VOD 자동 다운로드 OFF 시: 설정의 기본 화질/확장자 우선 선택 및 2번 위치 표시 검증
+# 13. VOD 자동 다운로드 OFF 시: 설정의 기본 화질/확장자 우선 선택 및 3번 위치 표시 검증
 def test_vod_auto_download_off_prioritizes_settings_default_quality_and_extension(
     main_window, qtbot
 ):
-    """자동 다운로드 OFF 시 4번 위치에 설정의 기본 화질/확장자가 우선 선택되고 2번 위치에 표시되는지 검증."""
+    """자동 다운로드 OFF 시 4번 위치에 설정의 기본 화질/확장자가 우선 선택되고 3번 위치에 표시되는지 검증."""
     update_current_settings(
         vod_auto_download=False,
         default_quality="720p",
@@ -510,8 +510,8 @@ def test_vod_auto_download_off_prioritizes_settings_default_quality_and_extensio
 
         card = main_window.task_list_widget.get_all_cards()[0]
 
-        # 1. 2번 위치에 설정의 기본 화질(720p) 표시
-        assert card.quality_label.text() == "720p"
+        # 1. 3번 위치(우하단)에 설정의 기본 화질(720p) 및 재생시간 표시
+        assert card.status_label.text() == "720p | 01:00:00"
 
         # 2. 4번 위치의 화질 드롭다운에 '720p'가 우선 선택되어 나타남
         assert card.quality_combo.currentText() == "720p"
@@ -525,18 +525,17 @@ def test_vod_auto_download_off_prioritizes_settings_default_quality_and_extensio
         ]
         assert combo_items == ["1080p60", "720p", "480p"]
 
-        # 5. 사용자가 4번 위치에서 화질을 '480p'로 변경 시 2번 위치와 3번 위치 모두 실시간 갱신
+        # 5. 사용자가 4번 위치에서 화질을 '480p'로 변경 시 3번 위치의 화질 표시도 실시간 갱신
         card.quality_combo.setCurrentText("480p")
-        assert card.quality_label.text() == "480p"
         assert card.selected_quality == "480p"
-        assert "480p" in card.status_label.text()
+        assert card.status_label.text() == "480p | 01:00:00"
 
 
-# 14. VOD 자동 다운로드 ON 시: 설정의 기본 화질로 2번 위치에 표시되고 해당 화질/확장자로 다운로드 시작 검증
+# 14. VOD 자동 다운로드 ON 시: 설정의 기본 화질로 3번 위치에 표시되고 해당 화질/확장자로 다운로드 시작 검증
 def test_vod_auto_download_on_downloads_with_settings_default_quality_and_extension(
     main_window, qtbot
 ):
-    """자동 다운로드 ON 시 2번 위치에 설정 화질이 표시되고 지정된 화질/확장자로 다운로드 시작되는지 검증."""
+    """자동 다운로드 ON 시 3번 위치에 설정 화질이 표시되고 지정된 화질/확장자로 다운로드 시작되는지 검증."""
     update_current_settings(
         vod_auto_download=True,
         default_quality="720p",
@@ -566,8 +565,8 @@ def test_vod_auto_download_on_downloads_with_settings_default_quality_and_extens
         # 1. DOWNLOADING 상태로 자동 진입
         assert card.status == TaskStatus.DOWNLOADING
 
-        # 2. 2번 위치에 설정의 기본 화질(720p) 표시
-        assert card.quality_label.text() == "720p"
+        # 2. 3번 위치에 설정의 기본 화질(720p) 표시
+        assert "720p" in card.status_label.text()
 
         # 3. 선택된 화질이 720p로 확정되어 다운로드됨
         assert card.selected_quality == "720p"
