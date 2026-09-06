@@ -460,7 +460,6 @@ class MainWindow(QMainWindow):
         """동일 VOD 재다운로드 확인 모달을 띄우고 승인 여부를 반환합니다 (확인/취소, 확인 하이라이트)."""
         return ask_confirm_dialog(
             parent=self,
-            title="작업 중복 확인",
             text="이미 추가한 작업입니다. 다시 다운로드하시겠습니까?",
         )
 

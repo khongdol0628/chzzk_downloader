@@ -9,11 +9,13 @@ import unittest.mock
 
 from PyQt6.QtWidgets import QMessageBox, QPushButton, QWidget
 
+DEFAULT_MODAL_TITLE = "Chzzk Downloader"
+
 
 def create_confirm_box(
     parent: QWidget | None,
-    title: str,
     text: str,
+    title: str = DEFAULT_MODAL_TITLE,
     confirm_text: str = "확인",
     cancel_text: str = "취소",
     is_danger: bool = False,
@@ -50,8 +52,8 @@ def create_confirm_box(
 
 def ask_confirm_dialog(
     parent: QWidget | None,
-    title: str,
     text: str,
+    title: str = DEFAULT_MODAL_TITLE,
     confirm_text: str = "확인",
     cancel_text: str = "취소",
     is_danger: bool = False,

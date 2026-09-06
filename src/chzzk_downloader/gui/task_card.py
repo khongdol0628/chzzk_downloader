@@ -526,7 +526,7 @@ class TaskCardWidget(QFrame):
     def _prompt_duplicate_resolution(self, filename: str) -> str:
         """동일 파일명 존재 시 처리 방법('overwrite', 'rename', 'cancel')을 묻는 대화상자를 띄웁니다."""
         msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("파일 중복 확인")
+        msg_box.setWindowTitle("Chzzk Downloader")
         msg_box.setText(
             f"이미 동일한 이름의 파일이 존재합니다:\n{filename}\n\n어떻게 처리하시겠습니까?"
         )
@@ -588,7 +588,6 @@ class TaskCardWidget(QFrame):
         """다운로드 중지 확인 모달을 띄우고 승인 여부를 반환합니다 (확인/취소, 확인 하이라이트)."""
         return ask_confirm_dialog(
             parent=self,
-            title="다운로드 중지 확인",
             text="정말 중지하시겠습니까?",
         )
 

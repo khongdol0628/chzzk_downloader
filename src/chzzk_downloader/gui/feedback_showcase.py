@@ -286,7 +286,7 @@ class FeedbackShowcaseWindow(QMainWindow):
     def _demo_modal_file_conflict(self) -> None:
         self._log("[M04] 파일명 중복 충돌 모달 (3선택 분기) 호출 대기...")
         msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("파일 중복 확인")
+        msg_box.setWindowTitle("Chzzk Downloader")
         msg_box.setText(
             "이미 동일한 이름의 파일이 존재합니다:\n[스트리머A] 2026-09-06 방송.mp4\n\n어떻게 처리하시겠습니까?"
         )
@@ -322,6 +322,7 @@ class FeedbackShowcaseWindow(QMainWindow):
             "선택한 폴더에 쓰기 권한이 없습니다:\nC:\\System\\Restricted\n\n다른 폴더를 선택해주세요.",
         )
         self._log("[M07] 경고 모달 닫힘")
+
 
 
 def main() -> None:

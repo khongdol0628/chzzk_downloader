@@ -10,26 +10,22 @@ from chzzk_downloader.gui.toast import ToastType, ToastWidget
 # 1. 확인 모달 규격 및 버튼 하이라이트 일관성 검증
 def test_confirm_modals_use_korean_confirm_cancel_and_default_highlight(qtbot):
     """모든 질문형 모달이 Yes/No 없이 '확인'/'취소'를 사용하고 '확인'에 기본 하이라이트가 적용되는지 검증."""
-    test_cases = [
-        # (ID, title, text, is_danger)
-        ("M01", "다운로드 중지 확인", "정말 중지하시겠습니까?", False),
-        (
-            "M02",
-            "작업 중복 확인",
-            "이미 추가한 작업입니다. 다시 다운로드하시겠습니까?",
-            False,
-        ),
-        ("M03", "쿠키 초기화", "저장된 쿠키를 삭제하시겠습니까?", True),
-    ]
-
-    for modal_id, title, text, is_danger in test_cases:
+    for modal_id, text, is_danger in [
+        ("M01", "정말 중지하시겠습니까?", False),
+        ("M02", "이미 추가한 작업입니다. 다시 다운로드하시겠습니까?", False),
+        ("M03", "저장된 쿠키를 삭제하시겠습니까?", True),
+    ]:
         msg_box, confirm_btn, cancel_btn = create_confirm_box(
             parent=None,
-            title=title,
             text=text,
             is_danger=is_danger,
         )
         qtbot.addWidget(msg_box)
+
+        # 0. 윈도우 아웃 프레임(타이틀) Chzzk Downloader 통일 검증
+        assert msg_box.windowTitle() == "Chzzk Downloader", (
+            f"[{modal_id}] 창 타이틀 불일치"
+        )
 
         # 1. 한글 확인/취소 검증
         assert confirm_btn.text() == "확인", f"[{modal_id}] 확인 버튼 텍스트 불일치"

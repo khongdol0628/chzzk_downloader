@@ -9,6 +9,8 @@
 ## 1. 디자인 및 문체(Tone & Voice) 기본 원칙
 
 ### 1) 모달 대화상자 (Modal Dialog)
+* **아웃 프레임(창 제목) 통일**:
+  * 모든 모달 대화상자의 윈도우 타이틀바(아웃 프레임)는 **`Chzzk Downloader`** 로 통일하여 일관된 앱 아이덴티티를 유지합니다. 질문 및 안내의 구체적인 내용은 본문 텍스트(`text`)에 명확히 표기합니다.
 * **버튼 명칭 통일**:
   * 단순 확인/취소 질문형 모달: **Yes / No 형태를 엄격히 금지**하고, 반드시 **`[확인]`**과 **`[취소]`** 명시적 한글 버튼을 사용합니다.
   * 다중 분기 선택 모달: 사용자가 취할 행동을 직관적으로 알 수 있는 명사/동사형 라벨(예: `[덮어쓰기]`, `[이름 변경]`, `[취소]`)을 사용합니다.
@@ -35,16 +37,17 @@
 
 ## 2. 모달 대화상자(Modal Dialog) 전수 카탈로그
 
-| ID | 카테고리 | 모달 제목 (`title`) | 본문 문구 (`text`) | 버튼 구성 (기본 하이라이트) | 스타일 | 관련 티켓 | 구현 위치 |
+| ID | 카테고리 | 창 제목 (`title`) | 본문 문구 (`text`) | 버튼 구성 (기본 하이라이트) | 스타일 | 관련 티켓 | 구현 위치 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **M01** | 다운로드 중지 | **다운로드 중지 확인** | `정말 중지하시겠습니까?` | `[확인(기본)]` / `[취소]` | Primary 파랑 (`#2563eb`) | T0109 | `TaskCardWidget._confirm_stop_dialog` |
-| **M02** | 작업 재다운로드 | **작업 중복 확인** | `이미 추가한 작업입니다. 다시 다운로드하시겠습니까?` | `[확인(기본)]` / `[취소]` | Primary 파랑 (`#2563eb`) | T0109 | `MainWindow._confirm_redownload_dialog` |
-| **M03** | 쿠키 초기화 | **쿠키 초기화** | `저장된 쿠키를 삭제하시겠습니까?` | `[확인(기본)]` / `[취소]` | Danger 빨강 (`#ef4444`) | T0106, T0108 | `SettingsWindow._on_clear_clicked` |
-| **M04** | 파일명 충돌 | **파일 중복 확인** | `이미 동일한 이름의 파일이 존재합니다:\n{filename}\n\n어떻게 처리하시겠습니까?` | `[덮어쓰기]` / `[이름 변경(기본)]` / `[취소]` | Action 회색 + 포커스 | T0109 | `TaskCardWidget._prompt_duplicate_resolution` |
-| **M05** | 쿠키 불러오기 결과 | **불러오기 완료 / 실패** | `쿠키를 성공적으로 불러왔습니다.`<br>`쿠키 파일 형식이 올바르지 않습니다: {msg}` | `[확인(기본)]` | Info / Warning | T0106 | `SettingsWindow._on_import_clicked` |
-| **M06** | 쿠키 내보내기 결과 | **내보내기 완료 / 실패** | `쿠키를 성공적으로 내보냈습니다.`<br>`쿠키 내보내기에 실패했습니다: {msg}` | `[확인(기본)]` | Info / Warning | T0106 | `SettingsWindow._on_export_clicked` |
-| **M07** | 폴더 권한 오류 | **폴더 오류** | `선택한 폴더에 쓰기 권한이 없습니다:\n{path}\n\n다른 폴더를 선택해주세요.` | `[확인(기본)]` | Warning | T0108 | `SettingsWindow._on_choose_folder` |
-| **M08** | 네이버 로그인 결과 | **쿠키 저장 완료 / 실패** | `로그인이 확인되어 네이버 쿠키가 저장되었습니다.`<br>`쿠키 저장 중 오류가 발생했습니다: {msg}` | `[확인(기본)]` | Info / Warning | T0106, T0107 | `NaverLoginDialog._on_save_and_close` |
+| **M01** | 다운로드 중지 | **Chzzk Downloader** | `정말 중지하시겠습니까?` | `[확인(기본)]` / `[취소]` | Primary 파랑 (`#2563eb`) | T0109 | `TaskCardWidget._confirm_stop_dialog` |
+| **M02** | 작업 재다운로드 | **Chzzk Downloader** | `이미 추가한 작업입니다. 다시 다운로드하시겠습니까?` | `[확인(기본)]` / `[취소]` | Primary 파랑 (`#2563eb`) | T0109 | `MainWindow._confirm_redownload_dialog` |
+| **M03** | 쿠키 초기화 | **Chzzk Downloader** | `저장된 쿠키를 삭제하시겠습니까?` | `[확인(기본)]` / `[취소]` | Danger 빨강 (`#ef4444`) | T0106, T0108 | `SettingsWindow._on_clear_clicked` |
+| **M04** | 파일명 충돌 | **Chzzk Downloader** | `이미 동일한 이름의 파일이 존재합니다:\n{filename}\n\n어떻게 처리하시겠습니까?` | `[덮어쓰기]` / `[이름 변경(기본)]` / `[취소]` | Action 회색 + 포커스 | T0109 | `TaskCardWidget._prompt_duplicate_resolution` |
+| **M05** | 쿠키 불러오기 결과 | **Chzzk Downloader** | `쿠키를 성공적으로 불러왔습니다.`<br>`쿠키 파일 형식이 올바르지 않습니다: {msg}` | `[확인(기본)]` | Info / Warning | T0106 | `SettingsWindow._on_import_clicked` |
+| **M06** | 쿠키 내보내기 결과 | **Chzzk Downloader** | `쿠키를 성공적으로 내보냈습니다.`<br>`쿠키 내보내기에 실패했습니다: {msg}` | `[확인(기본)]` | Info / Warning | T0106 | `SettingsWindow._on_export_clicked` |
+| **M07** | 폴더 권한 오류 | **Chzzk Downloader** | `선택한 폴더에 쓰기 권한이 없습니다:\n{path}\n\n다른 폴더를 선택해주세요.` | `[확인(기본)]` | Warning | T0108 | `SettingsWindow._on_choose_folder` |
+| **M08** | 네이버 로그인 결과 | **Chzzk Downloader** | `로그인이 확인되어 네이버 쿠키가 저장되었습니다.`<br>`쿠키 저장 중 오류가 발생했습니다: {msg}` | `[확인(기본)]` | Info / Warning | T0106, T0107 | `NaverLoginDialog._on_save_and_close` |
+
 
 ---
 
@@ -72,3 +75,4 @@
    - `uv run pytest tests/test_ui_feedback_catalog.py`를 실행하여 문체 및 버튼 규격 검증 통과 확인.
 4. [ ] **실행 확인**:
    - `uv run python -m chzzk_downloader.gui.feedback_showcase` 실행 후 눈으로 실제 렌더링 결과 확인.
+

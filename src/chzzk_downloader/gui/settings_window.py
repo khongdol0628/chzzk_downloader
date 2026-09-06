@@ -279,7 +279,6 @@ class SettingsWindow(QDialog):
         """등록된 쿠키를 초기화합니다 (확인/취소, 확인 하이라이트)."""
         if ask_confirm_dialog(
             self,
-            title="쿠키 초기화",
             text="저장된 쿠키를 삭제하시겠습니까?",
             is_danger=True,
         ):
@@ -302,7 +301,9 @@ class SettingsWindow(QDialog):
             )
         except Exception as e:
             QMessageBox.warning(
-                self, "폴더 오류", f"폴더 선택 창을 여는 중 오류가 발생했습니다: {e}"
+                self,
+                "폴더 오류",
+                f"폴더 선택 창을 여는 중 오류가 발생했습니다: {e}",
             )
             return
 
@@ -318,8 +319,11 @@ class SettingsWindow(QDialog):
                 QMessageBox.warning(self, "폴더 오류", msg)
         except Exception as e:
             QMessageBox.warning(
-                self, "폴더 오류", f"경로 갱신 중 예외가 발생했습니다: {e}"
+                self,
+                "폴더 오류",
+                f"경로 갱신 중 예외가 발생했습니다: {e}",
             )
+
 
     def _on_quality_changed(self, text: str) -> None:
         """기본 화질 콤보박스 변경 핸들러: 변경 즉시 영속화."""
