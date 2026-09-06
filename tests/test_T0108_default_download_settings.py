@@ -199,3 +199,114 @@ def test_settings_window_quality_and_ext_change_auto_saves(qtbot, test_settings_
 
     reloaded2 = load_settings(test_settings_env)
     assert reloaded2.file_extension == ".ts"
+
+
+def test_settings_recovery_from_zero_byte_and_truncated_file(test_settings_env):
+    """0바이트 빈 파일이나 부분 쓰기 도중 중단된(truncated) JSON 발생 시 안전한 기본값 복구 검증."""
+    # 1. 0바이트 빈 파일
+    test_settings_env.write_text("", encoding="utf-8")
+    settings = load_settings(test_settings_env)
+    assert settings.default_quality == "최고 화질"
+    assert settings.file_extension == ".mp4"
+    assert test_settings_env.stat().st_size > 0
+
+    # 2. 부분 쓰기 중단 (Truncated JSON)
+    test_settings_env.write_text('{"download_dir": "C:/incomplete', encoding="utf-8")
+    settings2 = load_settings(test_settings_env)
+    assert settings2.default_quality == "최고 화질"
+    assert settings2.file_extension == ".mp4"
+
+
+def test_settings_atomic_save_leaves_no_tmp_on_failure(test_settings_env, tmp_path):
+    """설정 저장 중 예외 발생 시 기존 설정 파일이 보존되고 임시 파일이 디스크에 잔류하지 않는지 검증."""
+    initial_settings = AppSettings(
+        download_dir=tmp_path, default_quality="1080p", file_extension=".mp4"
+    )
+    save_settings(initial_settings, test_settings_env)
+    orig_content = test_settings_env.read_text(encoding="utf-8")
+
+    # Path.replace 도중 크래시/I/O 실패 모킹
+    with patch.object(Path, "replace", side_effect=OSError("Disk write failure")):
+        new_settings = AppSettings(
+            download_dir=tmp_path, default_quality="360p", file_extension=".ts"
+        )
+        ok = save_settings(new_settings, test_settings_env)
+        assert ok is False
+
+    # 원본 파일이 손상되지 않고 보존됨
+    assert test_settings_env.read_text(encoding="utf-8") == orig_content
+    # 잔여 .tmp 파일이 정리되었는지 확인
+    tmp_files = list(test_settings_env.parent.glob("*.tmp"))
+    assert len(tmp_files) == 0
+
+
+def test_settings_window_folder_dialog_cancelled_or_error_maintains_path(
+    qtbot, test_settings_env
+):
+    """탐색기 창에서 사용자가 취소(ESC/취소 버튼)하거나 탐색기 에러 발생 시 UI와 설정이 변경 없이 안전하게 유지되는지 검증."""
+    orig_dir = get_default_download_dir().resolve()
+
+    window = SettingsWindow()
+    qtbot.addWidget(window)
+    window.show()
+
+    assert Path(window.folder_input.text()).resolve() == orig_dir
+
+    # 1. 탐색기 취소 (빈 문자열 반환)
+    with patch("PyQt6.QtWidgets.QFileDialog.getExistingDirectory", return_value=""):
+        window.folder_btn.click()
+        assert Path(window.folder_input.text()).resolve() == orig_dir
+        assert get_current_settings().download_dir.resolve() == orig_dir
+
+    # 2. 탐색기 호출 자체에서 시스템 예외 발생 시 크래시 방어
+    with patch(
+        "PyQt6.QtWidgets.QFileDialog.getExistingDirectory",
+        side_effect=RuntimeError("Explorer system error"),
+    ):
+        with patch.object(QMessageBox, "warning") as mock_warn:
+            window.folder_btn.click()
+            mock_warn.assert_called_once()
+            assert "폴더 오류" in mock_warn.call_args[0][1]
+
+        # 경로가 유지되는지 확인
+        assert Path(window.folder_input.text()).resolve() == orig_dir
+
+
+def test_validate_download_dir_network_timeout_and_cleanup(tmp_path):
+    """네트워크 지연이나 디스크 쓰기 I/O 실패 시 안전하게 False를 반환하고 임시 파일을 남기지 않는지 검증."""
+    target_dir = tmp_path / "network_test"
+    target_dir.mkdir()
+
+    with patch.object(Path, "write_text", side_effect=TimeoutError("Network timeout")):
+        ok, msg = validate_download_dir(target_dir)
+        assert ok is False
+        assert "폴더 쓰기 권한이 없습니다" in msg
+
+    # 임시 파일이 깨끗이 정리되었는지 확인
+    tmp_files = list(target_dir.glob(".write_test_*.tmp"))
+    assert len(tmp_files) == 0
+
+
+def test_settings_window_immediate_close_after_selection(
+    qtbot, test_settings_env, tmp_path
+):
+    """경로 설정 후 지연 없이 창이 즉시 닫혀도 원자적 저장 완료로 인해 데이터가 유실되지 않는지 검증."""
+    new_dir = tmp_path / "quick_close_dir"
+    new_dir.mkdir()
+
+    window = SettingsWindow()
+    qtbot.addWidget(window)
+    window.show()
+
+    with patch(
+        "PyQt6.QtWidgets.QFileDialog.getExistingDirectory",
+        return_value=str(new_dir),
+    ):
+        window.folder_btn.click()
+
+    # 즉시 창 닫기
+    window.close()
+
+    # 새 설정이 파일에 안전하게 반영되어 있는지 확인
+    reloaded = load_settings(test_settings_env)
+    assert reloaded.download_dir.resolve() == new_dir.resolve()

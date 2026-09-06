@@ -78,7 +78,11 @@ def validate_download_dir(path: Path | str) -> tuple[bool, str]:
     Returns:
         (is_valid, error_message)
     """
-    target = Path(path).resolve()
+    try:
+        target = Path(path).resolve()
+    except Exception as e:
+        return False, f"유효하지 않은 경로입니다: {e}"
+
     if not target.exists():
         return False, f"폴더가 존재하지 않습니다: {target}"
     if not target.is_dir():
@@ -87,9 +91,14 @@ def validate_download_dir(path: Path | str) -> tuple[bool, str]:
     test_file = target / f".write_test_{uuid4().hex}.tmp"
     try:
         test_file.write_text("write_test", encoding="utf-8")
-        test_file.unlink()
     except Exception as e:
         return False, f"폴더 쓰기 권한이 없습니다: {e}"
+    finally:
+        if test_file.exists():
+            try:
+                test_file.unlink()
+            except OSError:
+                pass
 
     return True, ""
 
@@ -132,7 +141,7 @@ def load_settings(settings_path: Path | None = None) -> AppSettings:
 
 
 def save_settings(settings: AppSettings, settings_path: Path | None = None) -> bool:
-    """애플리케이션 설정을 JSON 파일로 영속화하고 파일 권한을 안전하게 설정합니다."""
+    """애플리케이션 설정을 임시 파일 경유 원자적(Atomic) 교체로 영속화하여 비정상 종료 시 손상을 방지합니다."""
     global _current_settings
     target_path = settings_path or get_settings_file_path()
     try:
@@ -143,12 +152,21 @@ def save_settings(settings: AppSettings, settings_path: Path | None = None) -> b
             pass
 
         content = json.dumps(settings.to_dict(), indent=2, ensure_ascii=False)
-        target_path.write_text(content, encoding="utf-8")
-
+        # 원자적 파일 교체 (Atomic Write)
+        tmp_path = target_path.with_name(f"{target_path.name}.{uuid4().hex}.tmp")
         try:
-            target_path.chmod(0o600)
-        except OSError:
-            pass
+            tmp_path.write_text(content, encoding="utf-8")
+            try:
+                tmp_path.chmod(0o600)
+            except OSError:
+                pass
+            tmp_path.replace(target_path)
+        finally:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
 
         _current_settings = settings
         return True

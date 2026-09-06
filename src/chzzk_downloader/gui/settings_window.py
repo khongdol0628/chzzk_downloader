@@ -283,15 +283,30 @@ class SettingsWindow(QDialog):
     def _on_choose_folder(self) -> None:
         """폴더 아이콘 클릭 시 시스템 디렉터리 선택 창을 열어 경로를 지정합니다."""
         current_dir = self.folder_input.text() or str(Path.cwd())
-        selected = QFileDialog.getExistingDirectory(self, "저장 폴더 선택", current_dir)
-        if not selected:
+        try:
+            selected = QFileDialog.getExistingDirectory(
+                self, "저장 폴더 선택", current_dir
+            )
+        except Exception as e:
+            QMessageBox.warning(
+                self, "폴더 오류", f"폴더 선택 창을 여는 중 오류가 발생했습니다: {e}"
+            )
             return
 
-        ok, msg = update_current_settings(download_dir=selected)
-        if ok:
-            self.folder_input.setText(str(Path(selected).resolve()))
-        else:
-            QMessageBox.warning(self, "폴더 오류", msg)
+        if not selected:
+            # 사용자가 탐색기를 취소하거나 닫은 경우 기존 경로 유지
+            return
+
+        try:
+            ok, msg = update_current_settings(download_dir=selected)
+            if ok:
+                self.folder_input.setText(str(Path(selected).resolve()))
+            else:
+                QMessageBox.warning(self, "폴더 오류", msg)
+        except Exception as e:
+            QMessageBox.warning(
+                self, "폴더 오류", f"경로 갱신 중 예외가 발생했습니다: {e}"
+            )
 
     def _on_quality_changed(self, text: str) -> None:
         """기본 화질 콤보박스 변경 핸들러: 변경 즉시 영속화."""
