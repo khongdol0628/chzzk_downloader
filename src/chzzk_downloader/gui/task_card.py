@@ -30,6 +30,43 @@ from chzzk_downloader.core.url_parser import parse_chzzk_vod_url
 from chzzk_downloader.core.ytdlp import VodInfo
 
 
+def match_default_quality(available_qualities: list[str], target_quality: str) -> str:
+    """제공 가능한 화질 목록 중에서 설정의 기본 화질(target_quality)에 가장 적합한 화질을 찾습니다.
+
+    - target_quality가 '최고 화질'이거나 비어있으면 목록의 0번(최고화질)을 반환합니다.
+    - target_quality와 완전 일치하거나 접두사 일치(예: '720p' -> '720p60')하는 항목을 우선 반환합니다.
+    - 일치 항목이 없으면 목표 해상도 이하 중 가장 큰 화질을 반환합니다.
+    - 그 외에는 목록의 0번(최고화질)으로 폴백합니다.
+    """
+    if not available_qualities:
+        return ""
+    if not target_quality or target_quality == "최고 화질":
+        return available_qualities[0]
+
+    # 1. 완전 일치
+    if target_quality in available_qualities:
+        return target_quality
+
+    # 2. 접두사 일치 (예: "720p" -> "720p60")
+    for q in available_qualities:
+        if q.startswith(target_quality):
+            return q
+
+    # 3. 목표 해상도(height) 이하 중 최고 화질
+    try:
+        target_digits = "".join(c for c in target_quality if c.isdigit())
+        if target_digits:
+            target_h = int(target_digits)
+            for q in available_qualities:
+                h_digits = "".join(c for c in q.split("p")[0] if c.isdigit())
+                if h_digits and int(h_digits) <= target_h:
+                    return q
+    except ValueError:
+        pass
+
+    return available_qualities[0]
+
+
 class TaskStatus(Enum):
     """작업 카드 상태 열거형."""
 
@@ -58,7 +95,7 @@ class SpinnerWidget(QWidget):
 
     def start(self) -> None:
         if not self._timer.isActive():
-            self._timer.start(60)
+            self._timer.start(50)
 
     def stop(self) -> None:
         if self._timer.isActive():
@@ -69,30 +106,29 @@ class SpinnerWidget(QWidget):
     def paintEvent(self, event: QPaintEvent | None) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = self.rect().adjusted(2, 2, -2, -2)
-        pen = QPen(QColor("#9ca3af"), 2)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen = QPen(QColor("#3b82f6"), 2)
         painter.setPen(pen)
-        start_angle = -self._angle * 16
-        span_angle = 270 * 16
-        painter.drawArc(rect, start_angle, span_angle)
-        painter.end()
+        painter.translate(self._size / 2, self._size / 2)
+        painter.rotate(self._angle)
+        span = 270 * 16
+        r = (self._size - 3) / 2
+        painter.drawArc(int(-r), int(-r), int(2 * r), int(2 * r), 0, span)
 
 
 def format_duration(seconds: int) -> str:
-    """초 단위 재생 시간을 HH:MM:SS 또는 MM:SS 형식으로 변환합니다."""
+    """초 단위 재생 시간을 'MM:SS' 또는 'HH:MM:SS' 형식으로 포맷팅합니다."""
     if seconds <= 0:
         return "00:00"
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    secs = seconds % 60
-    if hours > 0:
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-    return f"{minutes:02d}:{secs:02d}"
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
 
 
 class ThumbnailLoaderThread(QThread):
-    """썸네일 이미지를 백그라운드에서 비동기로 다운로드하는 스레드."""
+    """썸네일 이미지 비동기 다운로드 스레드."""
 
     loaded = pyqtSignal(bytes)
 
@@ -106,15 +142,22 @@ class ThumbnailLoaderThread(QThread):
                 self.url,
                 headers={"User-Agent": DEFAULT_USER_AGENT},
             )
-            with urllib.request.urlopen(req, timeout=5.0) as resp:
-                data = resp.read()
-            self.loaded.emit(data)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = response.read()
+                self.loaded.emit(data)
         except Exception:
             pass
 
 
 class TaskCardWidget(QFrame):
-    """작업 목록에 표시되는 VOD 개별 작업 카드 위젯 (시계 방향 4분면 레이아웃)."""
+    """작업 목록의 단일 작업 카드 위젯.
+
+    4분면 레이아웃:
+    - 1번 위치 (좌상단): 작업명 / 제목 라벨
+    - 2번 위치 (우상단): 화질 라벨 + 회색조 액션 아이콘 (삭제 ✕)
+    - 3번 위치 (우하단): 재생 시간, 화질, 진행/실패 상태 라벨
+    - 4번 위치 (좌하단): 인증/대기/다운로드 중 상태별 인터랙션 컨테이너
+    """
 
     delete_requested = pyqtSignal()
     request_open_cookies = pyqtSignal()
@@ -183,7 +226,7 @@ class TaskCardWidget(QFrame):
         info_layout.setContentsMargins(0, 2, 0, 2)
         info_layout.setSpacing(4)
 
-        # 상단 행: 1번 위치(좌상단 타이틀) + 2번 위치(우상단 액션 아이콘)
+        # 상단 행: 1번 위치(좌상단 타이틀) + 2번 위치(우상단 기본 화질 및 액션 아이콘)
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(8)
@@ -198,8 +241,22 @@ class TaskCardWidget(QFrame):
         self.title_label.setStyleSheet("font-size: 13px; font-weight: 600;")
         top_row.addWidget(self.title_label, stretch=1)
 
-        # 2번 위치 (우상단): 회색조 액션 아이콘 그룹 (삭제 ✕ 버튼)
-        self.delete_btn = QPushButton("✕", self)
+        # 2번 위치 (우상단): 기본 화질 라벨 + 회색조 액션 아이콘 그룹 (삭제 ✕ 버튼)
+        self.top_action_container = QWidget(self)
+        top_action_layout = QHBoxLayout(self.top_action_container)
+        top_action_layout.setContentsMargins(0, 0, 0, 0)
+        top_action_layout.setSpacing(6)
+        top_action_layout.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop
+        )
+
+        self.quality_label = QLabel(self.top_action_container)
+        self.quality_label.setStyleSheet(
+            "color: #9ca3af; font-size: 11px; font-weight: 600; padding-top: 3px;"
+        )
+        top_action_layout.addWidget(self.quality_label)
+
+        self.delete_btn = QPushButton("✕", self.top_action_container)
         self.delete_btn.setToolTip("목록에서 제거")
         self.delete_btn.setFixedSize(24, 24)
         self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -212,7 +269,9 @@ class TaskCardWidget(QFrame):
             "QPushButton:hover { background-color: rgba(239, 68, 68, 0.2); color: #ef4444; border-radius: 3px; }"
         )
         self.delete_btn.clicked.connect(self.delete_requested.emit)
-        top_row.addWidget(self.delete_btn)
+        top_action_layout.addWidget(self.delete_btn)
+
+        top_row.addWidget(self.top_action_container)
 
         info_layout.addLayout(top_row)
         info_layout.addStretch()
@@ -415,13 +474,15 @@ class TaskCardWidget(QFrame):
             self.thumb_label.setText("")
 
     def _populate_qualities(self) -> None:
-        """vod_info.formats 기반으로 실제 제공 가능한 화질 목록을 구성합니다."""
+        """vod_info.formats 기반으로 실제 제공 가능한 화질 목록을 구성하고 설정의 기본 화질을 우선 선택합니다."""
         self.quality_combo.blockSignals(True)
         current_sel = self.selected_quality or self.quality_combo.currentText()
         self.quality_combo.clear()
 
         if not self.vod_info or not self.vod_info.formats:
             self.quality_combo.addItem("최고 화질")
+            self.selected_quality = "최고 화질"
+            self.quality_label.setText("최고 화질")
             self.quality_combo.blockSignals(False)
             return
 
@@ -443,16 +504,29 @@ class TaskCardWidget(QFrame):
             qualities.append("최고 화질")
 
         self.quality_combo.addItems(qualities)
+
+        settings = get_current_settings()
+        default_pref = settings.default_quality
+        matched_quality = match_default_quality(qualities, default_pref)
+
         if current_sel in qualities:
             self.quality_combo.setCurrentText(current_sel)
         else:
-            self.quality_combo.setCurrentIndex(0)
+            self.quality_combo.setCurrentText(matched_quality)
+
         self.selected_quality = self.quality_combo.currentText()
+        self.quality_label.setText(self.selected_quality)
         self.quality_combo.blockSignals(False)
 
     def _on_quality_selected(self, text: str) -> None:
         if text:
             self.selected_quality = text
+            self.quality_label.setText(text)
+            dur_str = format_duration(self.vod_info.duration) if self.vod_info else ""
+            if self.status == TaskStatus.STOPPED:
+                self.status_label.setText(f"{text} | 중지됨" if text else "중지됨")
+            elif dur_str:
+                self.status_label.setText(f"{text} | {dur_str}")
 
     def _on_change_folder_clicked(self) -> None:
         """📁 폴더 버튼 클릭 핸들러: 이 카드의 저장 폴더를 개별 변경합니다."""
@@ -547,6 +621,8 @@ class TaskCardWidget(QFrame):
         if self.status in (TaskStatus.DOWNLOADING, TaskStatus.STOPPED):
             self.status = TaskStatus.READY
         self.error_message = ""
+        self.selected_quality = ""
+        self.quality_label.setText("")
         self.status = TaskStatus.ANALYZING
         self._update_display()
         self._apply_style()
@@ -557,6 +633,7 @@ class TaskCardWidget(QFrame):
             # 유저 요구사항: 읽는 중… URL
             self.title_label.setText(f"읽는 중… {self.raw_url}")
             self.status_label.setText("분석 중...")
+            self.quality_label.setText("")
             self.auth_container.hide()
             self.ready_container.hide()
             self.downloading_container.hide()
@@ -568,6 +645,7 @@ class TaskCardWidget(QFrame):
                 self.title_label.setText(self.vod_info.display_name)
                 dur_str = format_duration(self.vod_info.duration)
                 quality_str = self.selected_quality or self.quality_combo.currentText()
+                self.quality_label.setText(quality_str)
                 self.status_label.setText(
                     f"{quality_str} | {dur_str}" if quality_str else dur_str
                 )
@@ -583,6 +661,7 @@ class TaskCardWidget(QFrame):
                 self.title_label.setText(self.vod_info.display_name)
                 dur_str = format_duration(self.vod_info.duration)
                 quality_str = self.selected_quality or self.quality_combo.currentText()
+                self.quality_label.setText(quality_str)
                 self.status_label.setText(
                     f"{quality_str} | {dur_str}" if quality_str else dur_str
                 )
@@ -596,10 +675,12 @@ class TaskCardWidget(QFrame):
                 self.title_label.setText(self.vod_info.display_name)
                 dur_str = format_duration(self.vod_info.duration)
                 quality_str = self.selected_quality or self.quality_combo.currentText()
+                self.quality_label.setText(quality_str)
                 self.status_label.setText(
                     f"{quality_str} | 중지됨" if quality_str else "중지됨"
                 )
             else:
+                self.quality_label.setText("")
                 self.status_label.setText("중지됨")
             # 4번 위치 컨트롤 모두 숨김 (재개 불가 완결 작업)
             self.auth_container.hide()
@@ -612,6 +693,7 @@ class TaskCardWidget(QFrame):
         elif self.status == TaskStatus.FAILED_LOGIN_REQUIRED:
             self.title_label.setText(f"Login required; Please login: {self.raw_url}")
             self.status_label.setText("로그인 필요")
+            self.quality_label.setText("")
             self.auth_container.show()
             self.ready_container.hide()
             self.downloading_container.hide()
@@ -621,6 +703,7 @@ class TaskCardWidget(QFrame):
         elif self.status == TaskStatus.FAILED_INVALID:
             self.title_label.setText(f"Invalid: {self.raw_url}")
             self.status_label.setText(self.error_message or "분석 실패")
+            self.quality_label.setText("")
             self.auth_container.hide()
             self.ready_container.hide()
             self.downloading_container.hide()
@@ -673,6 +756,10 @@ class TaskCardWidget(QFrame):
         self.vod_info = info
         self.video_no = info.video_no or self.video_no
         self._populate_qualities()
+        # 설정의 기본 확장자 반영
+        settings = get_current_settings()
+        if settings.file_extension in AVAILABLE_EXTENSIONS:
+            self.ext_combo.setCurrentText(settings.file_extension)
         self._update_display()
         self._apply_style()
         if info.thumbnail_url:

@@ -460,3 +460,118 @@ def test_rapid_successive_same_url_inputs_blocked(main_window, qtbot):
         assert main_window.task_list_widget.list_widget.count() == 1
         assert main_window.toast.isHidden() is False
         assert "이미 추가한 작업입니다." in main_window.toast.label.text()
+
+
+# 12. 화질 매칭 도우미 함수 단위 검증
+def test_match_default_quality_helper():
+    """설정의 기본 화질에 따라 제공 화질 목록에서 가장 적합한 화질이 매칭되는지 검증."""
+    from chzzk_downloader.gui.task_card import match_default_quality
+
+    qualities = ["1080p60", "720p", "480p"]
+    assert match_default_quality(qualities, "최고 화질") == "1080p60"
+    assert match_default_quality(qualities, "1080p") == "1080p60"
+    assert match_default_quality(qualities, "720p") == "720p"
+    assert match_default_quality(qualities, "480p") == "480p"
+
+    # 설정한 화질이 목록에 없을 때 (예: 720p 설정인데 480p, 360p만 있는 경우) -> 이하 중 최고 화질
+    lower_qualities = ["480p", "360p"]
+    assert match_default_quality(lower_qualities, "720p") == "480p"
+
+
+# 13. VOD 자동 다운로드 OFF 시: 설정의 기본 화질/확장자 우선 선택 및 2번 위치 표시 검증
+def test_vod_auto_download_off_prioritizes_settings_default_quality_and_extension(
+    main_window, qtbot
+):
+    """자동 다운로드 OFF 시 4번 위치에 설정의 기본 화질/확장자가 우선 선택되고 2번 위치에 표시되는지 검증."""
+    update_current_settings(
+        vod_auto_download=False,
+        default_quality="720p",
+        file_extension=".ts",
+    )
+
+    mock_vod = VodInfo(
+        video_no="15016450",
+        video_title="기본 설정 테스트 방송",
+        channel_name="스트리머A",
+        duration=3600,
+        formats=[
+            VodFormatInfo(format_id="1080p", height=1080, fps=60.0),
+            VodFormatInfo(format_id="720p", height=720, fps=30.0),
+            VodFormatInfo(format_id="480p", height=480, fps=30.0),
+        ],
+        live_open_date="2024-05-06",
+    )
+
+    with patch("chzzk_downloader.gui.workers.extract_vod_info", return_value=mock_vod):
+        test_url = "https://chzzk.naver.com/video/15016450"
+        main_window.url_input.setText(test_url)
+        main_window.download_btn.click()
+        qtbot.waitUntil(lambda: main_window.download_btn.isEnabled(), timeout=2000)
+
+        card = main_window.task_list_widget.get_all_cards()[0]
+
+        # 1. 2번 위치에 설정의 기본 화질(720p) 표시
+        assert card.quality_label.text() == "720p"
+
+        # 2. 4번 위치의 화질 드롭다운에 '720p'가 우선 선택되어 나타남
+        assert card.quality_combo.currentText() == "720p"
+
+        # 3. 4번 위치의 확장자 드롭다운에 '.ts'가 기본 선택되어 나타남
+        assert card.ext_combo.currentText() == ".ts"
+
+        # 4. 클릭 시 드롭다운 항목에는 가능한 모든 화질 목록이 제공됨
+        combo_items = [
+            card.quality_combo.itemText(i) for i in range(card.quality_combo.count())
+        ]
+        assert combo_items == ["1080p60", "720p", "480p"]
+
+        # 5. 사용자가 4번 위치에서 화질을 '480p'로 변경 시 2번 위치와 3번 위치 모두 실시간 갱신
+        card.quality_combo.setCurrentText("480p")
+        assert card.quality_label.text() == "480p"
+        assert card.selected_quality == "480p"
+        assert "480p" in card.status_label.text()
+
+
+# 14. VOD 자동 다운로드 ON 시: 설정의 기본 화질로 2번 위치에 표시되고 해당 화질/확장자로 다운로드 시작 검증
+def test_vod_auto_download_on_downloads_with_settings_default_quality_and_extension(
+    main_window, qtbot
+):
+    """자동 다운로드 ON 시 2번 위치에 설정 화질이 표시되고 지정된 화질/확장자로 다운로드 시작되는지 검증."""
+    update_current_settings(
+        vod_auto_download=True,
+        default_quality="720p",
+        file_extension=".ts",
+    )
+
+    mock_vod = VodInfo(
+        video_no="15016450",
+        video_title="자동 다운로드 화질 테스트",
+        channel_name="스트리머A",
+        duration=1800,
+        formats=[
+            VodFormatInfo(format_id="1080p", height=1080, fps=60.0),
+            VodFormatInfo(format_id="720p", height=720, fps=30.0),
+            VodFormatInfo(format_id="480p", height=480, fps=30.0),
+        ],
+    )
+
+    with patch("chzzk_downloader.gui.workers.extract_vod_info", return_value=mock_vod):
+        test_url = "https://chzzk.naver.com/video/15016450"
+        main_window.url_input.setText(test_url)
+        main_window.download_btn.click()
+        qtbot.waitUntil(lambda: main_window.download_btn.isEnabled(), timeout=2000)
+
+        card = main_window.task_list_widget.get_all_cards()[0]
+
+        # 1. DOWNLOADING 상태로 자동 진입
+        assert card.status == TaskStatus.DOWNLOADING
+
+        # 2. 2번 위치에 설정의 기본 화질(720p) 표시
+        assert card.quality_label.text() == "720p"
+
+        # 3. 선택된 화질이 720p로 확정되어 다운로드됨
+        assert card.selected_quality == "720p"
+
+        # 4. 다운로드 파일명이 설정의 기본 확장자(.ts)로 지정됨
+        assert card.target_path is not None
+        assert card.target_path.suffix == ".ts"
