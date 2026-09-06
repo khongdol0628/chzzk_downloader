@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMenu,
-    QMessageBox,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -24,6 +23,7 @@ from PyQt6.QtWidgets import (
 from chzzk_downloader.config import SUCCESS_TOAST_DURATION_MS
 from chzzk_downloader.core.url_parser import parse_chzzk_vod_url
 from chzzk_downloader.core.ytdlp import VodInfo
+from chzzk_downloader.gui.dialogs import ask_confirm_dialog
 from chzzk_downloader.gui.task_card import TaskCardWidget, TaskStatus
 from chzzk_downloader.gui.toast import ToastType, ToastWidget
 from chzzk_downloader.gui.workers import VodCheckWorker
@@ -457,15 +457,12 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _confirm_redownload_dialog(self) -> bool:
-        """동일 VOD 재다운로드 확인 모달을 띄우고 승인 여부를 반환합니다."""
-        reply = QMessageBox.question(
-            self,
-            "작업 중복 확인",
-            "이미 추가한 작업입니다. 다시 다운로드하시겠습니까?",
-            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
+        """동일 VOD 재다운로드 확인 모달을 띄우고 승인 여부를 반환합니다 (확인/취소, 확인 하이라이트)."""
+        return ask_confirm_dialog(
+            parent=self,
+            title="작업 중복 확인",
+            text="이미 추가한 작업입니다. 다시 다운로드하시겠습니까?",
         )
-        return reply == QMessageBox.StandardButton.Ok
 
     def _on_download_clicked(self) -> None:
         """다운로드 버튼 클릭 핸들러 (T0104, T0109)."""

@@ -29,6 +29,7 @@ from chzzk_downloader.core.settings_manager import (
     update_current_settings,
 )
 from chzzk_downloader.gui.cookie_viewer_dialog import CookieViewerDialog
+from chzzk_downloader.gui.dialogs import ask_confirm_dialog
 
 
 class SettingsWindow(QDialog):
@@ -275,15 +276,13 @@ class SettingsWindow(QDialog):
                 QMessageBox.warning(self, "내보내기 실패", msg)
 
     def _on_clear_clicked(self) -> None:
-        """등록된 쿠키를 초기화합니다."""
-        reply = QMessageBox.question(
+        """등록된 쿠키를 초기화합니다 (확인/취소, 확인 하이라이트)."""
+        if ask_confirm_dialog(
             self,
-            "쿠키 초기화",
-            "저장된 쿠키를 삭제하시겠습니까?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+            title="쿠키 초기화",
+            text="저장된 쿠키를 삭제하시겠습니까?",
+            is_danger=True,
+        ):
             ok, msg = clear_cookies()
             if ok:
                 self.refresh_status()

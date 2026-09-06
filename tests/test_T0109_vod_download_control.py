@@ -24,25 +24,22 @@ from chzzk_downloader.gui.task_card import TaskCardWidget, TaskStatus
 
 
 @pytest.fixture
-def temp_settings_env(tmp_path, monkeypatch):
+def temp_settings_env(tmp_path):
     """임시 디렉터리에 격리된 settings.json 환경을 제공하는 fixture."""
+    from chzzk_downloader.core.settings_manager import set_custom_settings_path
+
     test_settings_dir = tmp_path / ".chzzk_downloader"
     test_settings_file = test_settings_dir / "settings.json"
+    set_custom_settings_path(test_settings_file)
 
-    def mock_get_settings_file_path():
-        return test_settings_file
-
-    monkeypatch.setattr(
-        "chzzk_downloader.core.settings_manager.get_settings_file_path",
-        mock_get_settings_file_path,
-    )
     update_current_settings(
         download_dir=str(tmp_path / "chzzk_downloaded"),
         default_quality="최고 화질",
         file_extension=".mp4",
         vod_auto_download=True,
     )
-    return test_settings_file
+    yield test_settings_file
+    set_custom_settings_path(None)
 
 
 @pytest.fixture
@@ -638,3 +635,36 @@ def test_stopped_vod_redownload_applies_new_settings_quality_and_extension(
             assert card.ext_combo.currentText() == ".ts"
             assert "720p" in card.status_label.text()
             assert card.selected_quality == "720p"
+
+
+# 16. 모달 대화상자 확인/취소 버튼 및 확인 하이라이트(기본 버튼/스타일) 검증
+def test_confirm_modal_buttons_and_highlight(qtbot):
+    """모달에서 Yes/No 대신 '확인'/'취소' 버튼을 사용하고 '확인'에 기본 하이라이트가 적용되는지 검증."""
+    from chzzk_downloader.gui.dialogs import create_confirm_box
+
+    msg_box, confirm_btn, cancel_btn = create_confirm_box(
+        parent=None,
+        title="테스트 제목",
+        text="테스트 내용",
+    )
+    qtbot.addWidget(msg_box)
+
+    # 1. 버튼 텍스트 확인
+    assert confirm_btn.text() == "확인"
+    assert cancel_btn.text() == "취소"
+
+    # 2. 확인 버튼에 defaultButton 설정 및 하이라이트 스타일 확인
+    assert msg_box.defaultButton() == confirm_btn
+    assert "#2563eb" in confirm_btn.styleSheet()
+    assert "font-weight: bold" in confirm_btn.styleSheet()
+
+    # 3. danger 옵션(예: 쿠키 초기화) 시 빨간색 하이라이트 확인
+    danger_box, danger_confirm, _ = create_confirm_box(
+        parent=None,
+        title="위험 삭제",
+        text="정말 삭제하시겠습니까?",
+        is_danger=True,
+    )
+    qtbot.addWidget(danger_box)
+    assert danger_box.defaultButton() == danger_confirm
+    assert "#ef4444" in danger_confirm.styleSheet()

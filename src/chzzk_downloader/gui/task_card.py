@@ -28,6 +28,7 @@ from chzzk_downloader.core.filename_generator import (
 from chzzk_downloader.core.settings_manager import get_current_settings
 from chzzk_downloader.core.url_parser import parse_chzzk_vod_url
 from chzzk_downloader.core.ytdlp import VodInfo
+from chzzk_downloader.gui.dialogs import ask_confirm_dialog
 
 
 def match_default_quality(available_qualities: list[str], target_quality: str) -> str:
@@ -583,16 +584,17 @@ class TaskCardWidget(QFrame):
         self.download_started.emit()
         return True
 
+    def _confirm_stop_dialog(self) -> bool:
+        """다운로드 중지 확인 모달을 띄우고 승인 여부를 반환합니다 (확인/취소, 확인 하이라이트)."""
+        return ask_confirm_dialog(
+            parent=self,
+            title="다운로드 중지 확인",
+            text="정말 중지하시겠습니까?",
+        )
+
     def trigger_stop_download(self) -> bool:
         """다운로드 중지 트리거: 확인 모달 승인 시 안전 중단 및 완결(STOPPED) 상태로 전이."""
-        reply = QMessageBox.question(
-            self,
-            "다운로드 중지 확인",
-            "정말 중지하시겠습니까?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        if not self._confirm_stop_dialog():
             return False
 
         # 중지된 후에는 완결된 작업으로 처리되어 4번 위치에 대기 컨트롤이 나타나지 않음
