@@ -22,3 +22,15 @@ DEFAULT_USER_AGENT: str = (
 
 # 기본 쿠키 파일 저장 경로
 DEFAULT_COOKIE_FILE_PATH: Path = Path.home() / ".chzzk_downloader" / "cookies.txt"
+
+# 기본 설정 파일 저장 경로 (T0108)
+DEFAULT_SETTINGS_FILE_PATH: Path = Path.home() / ".chzzk_downloader" / "settings.json"
+
+# 기본 다운로드 디렉터리 이름 (T0108)
+DEFAULT_DOWNLOAD_DIR_NAME: str = "chzzk_downloaded"
+
+# 선택 가능한 기본 화질 목록 (T0108)
+AVAILABLE_QUALITIES: tuple[str, ...] = ("최고 화질", "1080p", "720p", "480p", "360p")
+
+# 선택 가능한 기본 파일 확장자 목록 (T0108)
+AVAILABLE_EXTENSIONS: tuple[str, ...] = (".mp4", ".ts")

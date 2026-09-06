@@ -217,14 +217,8 @@ def test_main_window_startup_verification_expired_shows_action_toast(
         qtbot.addWidget(window)
         window.show()
 
-        # 워커 종료 대기
-        if window._cookie_verify_worker:
-            qtbot.waitUntil(
-                lambda: not window._cookie_verify_worker.isRunning(), timeout=2000
-            )
-
-        # 액션 토스트 노출 확인
-        assert window.toast.isHidden() is False
+        # 워커 종료 및 액션 토스트 노출 대기
+        qtbot.waitUntil(lambda: window.toast.isHidden() is False, timeout=2000)
         assert window.toast._is_action_mode is True
         assert "만료되었습니다" in window.toast.label.text()
         assert len(window.toast._action_buttons) == 2

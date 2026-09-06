@@ -4,22 +4,29 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from chzzk_downloader.config import AVAILABLE_EXTENSIONS, AVAILABLE_QUALITIES
 from chzzk_downloader.core.cookie_manager import (
     clear_cookies,
     export_cookie_file,
     get_cookie_status_summary,
     load_cookie_file,
+)
+from chzzk_downloader.core.settings_manager import (
+    get_current_settings,
+    update_current_settings,
 )
 from chzzk_downloader.gui.cookie_viewer_dialog import CookieViewerDialog
 
@@ -32,7 +39,7 @@ class SettingsWindow(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.Window)
         self.setWindowTitle("환경설정")
-        self.resize(520, 320)
+        self.resize(520, 460)
         self.setModal(False)  # Modeless 창으로 메인 창 상호작용 허용
 
         self._init_ui()
@@ -43,7 +50,65 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(14)
 
-        # 1. 네이버 / 치지직 쿠키 설정 그룹
+        # 1. 일반 설정 그룹 (T0108: 쿠키 관리보다 위쪽에 배치)
+        self.general_group = QGroupBox("일반", self)
+        general_layout = QVBoxLayout(self.general_group)
+        general_layout.setContentsMargins(12, 14, 12, 14)
+        general_layout.setSpacing(10)
+
+        # 저장 폴더 라벨
+        folder_label = QLabel("저장 폴더", self.general_group)
+        folder_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+        general_layout.addWidget(folder_label)
+
+        # 저장 폴더 경로 및 폴더 아이콘 버튼
+        folder_row = QHBoxLayout()
+        folder_row.setSpacing(8)
+        self.folder_input = QLineEdit(self.general_group)
+        self.folder_input.setReadOnly(True)  # 직접 입력 없이 탐색기로만 경로 지정
+        self.folder_input.setPlaceholderText("기본 저장 폴더 경로")
+        folder_row.addWidget(self.folder_input)
+
+        self.folder_btn = QPushButton("📁", self.general_group)
+        self.folder_btn.setToolTip("저장 폴더 선택")
+        self.folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.folder_btn.setFixedWidth(36)
+        self.folder_btn.clicked.connect(self._on_choose_folder)
+        folder_row.addWidget(self.folder_btn)
+        general_layout.addLayout(folder_row)
+
+        # 화질 및 확장자 드롭다운 행
+        opts_row = QHBoxLayout()
+        opts_row.setSpacing(12)
+
+        quality_label = QLabel("기본 화질:", self.general_group)
+        opts_row.addWidget(quality_label)
+        self.quality_combo = QComboBox(self.general_group)
+        self.quality_combo.addItems(list(AVAILABLE_QUALITIES))
+        self.quality_combo.currentTextChanged.connect(self._on_quality_changed)
+        opts_row.addWidget(self.quality_combo)
+
+        opts_row.addSpacing(16)
+
+        ext_label = QLabel("파일 확장자:", self.general_group)
+        opts_row.addWidget(ext_label)
+        self.ext_combo = QComboBox(self.general_group)
+        self.ext_combo.addItems(list(AVAILABLE_EXTENSIONS))
+        self.ext_combo.currentTextChanged.connect(self._on_ext_changed)
+        opts_row.addWidget(self.ext_combo)
+
+        opts_row.addStretch()
+        general_layout.addLayout(opts_row)
+
+        # 현재 설정값 UI 반영
+        settings = get_current_settings()
+        self.folder_input.setText(str(settings.download_dir))
+        self.quality_combo.setCurrentText(settings.default_quality)
+        self.ext_combo.setCurrentText(settings.file_extension)
+
+        layout.addWidget(self.general_group)
+
+        # 2. 네이버 / 치지직 쿠키 설정 그룹
         self.cookie_group = QGroupBox("네이버 / 치지직 쿠키 관리", self)
         group_layout = QVBoxLayout(self.cookie_group)
         group_layout.setContentsMargins(12, 14, 12, 14)
@@ -214,3 +279,26 @@ class SettingsWindow(QDialog):
                 )
             else:
                 QMessageBox.warning(self, "초기화 실패", msg)
+
+    def _on_choose_folder(self) -> None:
+        """폴더 아이콘 클릭 시 시스템 디렉터리 선택 창을 열어 경로를 지정합니다."""
+        current_dir = self.folder_input.text() or str(Path.cwd())
+        selected = QFileDialog.getExistingDirectory(self, "저장 폴더 선택", current_dir)
+        if not selected:
+            return
+
+        ok, msg = update_current_settings(download_dir=selected)
+        if ok:
+            self.folder_input.setText(str(Path(selected).resolve()))
+        else:
+            QMessageBox.warning(self, "폴더 오류", msg)
+
+    def _on_quality_changed(self, text: str) -> None:
+        """기본 화질 콤보박스 변경 핸들러: 변경 즉시 영속화."""
+        if text:
+            update_current_settings(default_quality=text)
+
+    def _on_ext_changed(self, text: str) -> None:
+        """파일 확장자 콤보박스 변경 핸들러: 변경 즉시 영속화."""
+        if text:
+            update_current_settings(file_extension=text)
